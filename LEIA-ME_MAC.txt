@@ -1,0 +1,33 @@
+CENTRAL MOBYAN COMPLETA PARA macOS (MacBook Air M1)
+
+Esta versão possui as mesmas funções da Central do Windows:
+- Gerar Pendências
+- Enviar WhatsApp
+- Gerar Roteirização automática Mobyan + OGEA
+- Gerar PDFs e unir Mobyan + OGEA em um roteiro por técnico
+- Abrir planilhas, imagens e PDFs pela Central
+
+INSTALAÇÃO MAIS SIMPLES
+1. Descompacte o ZIP.
+2. Clique com o botão direito em INSTALAR_MAC.command e escolha Abrir.
+3. Caso o macOS bloqueie, abra o Terminal dentro da pasta e execute:
+   chmod +x *.command
+   ./INSTALAR_MAC.command
+4. O instalador copiará tudo para ~/mobyan-automacoes.
+5. Ele criará o aplicativo Central Mobyan em Aplicativos e na Mesa.
+
+CONFIGURAÇÃO
+Por segurança, este pacote não contém usuários nem senhas.
+- Se o Mac já possui ~/mobyan-automacoes/.env, ele será preservado.
+- Caso contrário, execute MIGRAR_CONFIGURACAO_DO_WINDOWS.command e arraste
+  a pasta da Central do Windows para a janela do Terminal.
+- O perfil do WhatsApp não é migrado entre sistemas; será necessário ler
+  o QR Code novamente na primeira utilização.
+
+ROTINA DIÁRIA
+1. Gerar Roteirização
+2. Gerar PDFs
+3. Abrir PDFs e imprimir Roteiro - Nome do Técnico.pdf
+
+O botão Gerar PDFs já faz tudo: gera Mobyan, gera OGEA, une por técnico,
+valida as páginas e apaga os arquivos temporários.
