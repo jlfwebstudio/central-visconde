@@ -1568,10 +1568,28 @@ def chromium_instalado():
         return False
 
 
+ARQUIVO_LOG_NAVEGADOR = BASE_DIR / "logs" / "instalacao_navegador.log"
+
+
+def _registrar_log_navegador(linhas):
+    try:
+        ARQUIVO_LOG_NAVEGADOR.parent.mkdir(parents=True, exist_ok=True)
+        with ARQUIVO_LOG_NAVEGADOR.open("a", encoding="utf-8") as arquivo:
+            arquivo.write(f"\n{'=' * 70}\n{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
+            for linha in linhas:
+                arquivo.write(str(linha) + "\n")
+    except Exception:
+        pass
+
+
 def instalar_chromium_com_progresso(root, ao_concluir):
     """Baixa o Chromium do Playwright em segundo plano, mostrando um diálogo
     simples de progresso. Chama ao_concluir(erro) na thread principal do Tk
-    quando terminar (erro=None em caso de sucesso)."""
+    quando terminar (erro=None em caso de sucesso).
+
+    Tudo que acontece aqui é registrado em ARQUIVO_LOG_NAVEGADOR — se isso
+    falhar numa máquina que não temos acesso direto, esse arquivo é o que
+    permite diagnosticar sem depender de descrever o erro por texto."""
     janela = tk.Toplevel(root)
     janela.title("Central Visconde")
     janela.configure(bg=COR_FUNDO)
@@ -1597,21 +1615,44 @@ def instalar_chromium_com_progresso(root, ao_concluir):
 
     def worker():
         erro = None
+        log = ["Iniciando instalação do Chromium..."]
         try:
             from playwright._impl._driver import compute_driver_executable, get_driver_env
             driver_executable, driver_cli = compute_driver_executable()
+            log.append(f"driver_executable={driver_executable} (existe={Path(driver_executable).exists()})")
+            log.append(f"driver_cli={driver_cli} (existe={Path(driver_cli).exists()})")
+
             resultado = subprocess.run(
                 [str(driver_executable), driver_cli, "install", "chromium"],
                 env=get_driver_env(),
+                capture_output=True,
+                text=True,
+                errors="replace",
             )
+            log.append(f"returncode={resultado.returncode}")
+            if resultado.stdout:
+                log.append("--- stdout ---\n" + resultado.stdout)
+            if resultado.stderr:
+                log.append("--- stderr ---\n" + resultado.stderr)
+
             if resultado.returncode != 0:
                 erro = "A instalação do navegador terminou com código de erro."
+            elif not chromium_instalado():
+                erro = "A instalação terminou sem erro, mas o navegador continua não encontrado."
         except Exception as exc:
             erro = str(exc)
+            log.append(f"EXCEÇÃO: {exc!r}")
+
+        log.append(f"Resultado final: {'OK' if not erro else erro}")
+        _registrar_log_navegador(log)
 
         def finalizar():
             janela.destroy()
-            ao_concluir(erro)
+            if erro:
+                erro_completo = f"{erro}\n\nDetalhes em: {ARQUIVO_LOG_NAVEGADOR}"
+            else:
+                erro_completo = None
+            ao_concluir(erro_completo)
 
         root.after(0, finalizar)
 
