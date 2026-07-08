@@ -1622,12 +1622,22 @@ def instalar_chromium_com_progresso(root, ao_concluir):
             log.append(f"driver_executable={driver_executable} (existe={Path(driver_executable).exists()})")
             log.append(f"driver_cli={driver_cli} (existe={Path(driver_cli).exists()})")
 
+            kwargs_processo = {}
+            if os.name == "nt":
+                kwargs_processo["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            # --force evita que uma tentativa anterior parcial/corrompida (ex:
+            # interrompida por antivírus) faça o instalador achar que já está
+            # tudo pronto e não baixar nada. --no-shell pula o Chrome Headless
+            # Shell, que não usamos (a automação sempre roda com navegador
+            # visível, headless=False).
             resultado = subprocess.run(
-                [str(driver_executable), driver_cli, "install", "chromium"],
+                [str(driver_executable), driver_cli, "install", "--force", "--no-shell", "chromium"],
                 env=get_driver_env(),
                 capture_output=True,
                 text=True,
                 errors="replace",
+                **kwargs_processo,
             )
             log.append(f"returncode={resultado.returncode}")
             if resultado.stdout:
@@ -1639,6 +1649,17 @@ def instalar_chromium_com_progresso(root, ao_concluir):
                 erro = "A instalação do navegador terminou com código de erro."
             elif not chromium_instalado():
                 erro = "A instalação terminou sem erro, mas o navegador continua não encontrado."
+                try:
+                    from playwright.sync_api import sync_playwright
+                    with sync_playwright() as playwright:
+                        pasta_navegadores = Path(playwright.chromium.executable_path).parent.parent.parent
+                        if pasta_navegadores.exists():
+                            log.append(f"Conteúdo de {pasta_navegadores}:")
+                            log.extend(f"  - {item.name}" for item in pasta_navegadores.iterdir())
+                        else:
+                            log.append(f"Pasta {pasta_navegadores} nem existe.")
+                except Exception as exc_diag:
+                    log.append(f"Não consegui inspecionar a pasta de navegadores: {exc_diag!r}")
         except Exception as exc:
             erro = str(exc)
             log.append(f"EXCEÇÃO: {exc!r}")

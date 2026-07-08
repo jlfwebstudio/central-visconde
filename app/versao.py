@@ -4,4 +4,4 @@ Comparada contra a versão publicada no backend (ver `verificar_atualizacao` em
 autenticacao.py) pra avisar o usuário quando existe uma versão mais nova.
 """
 
-VERSAO_ATUAL = "1.0.1"
+VERSAO_ATUAL = "1.0.2"
