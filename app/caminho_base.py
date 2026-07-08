@@ -36,3 +36,12 @@ else:
     RECURSOS_DIR = _RAIZ_REPO
 
 BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+if FROZEN:
+    # Sem isso, o Playwright resolve "onde procurar o Chromium já instalado"
+    # de um jeito e "onde o instalador baixou" de outro dentro de um
+    # executável empacotado (visto em teste real no Windows: o download foi
+    # pra %LOCALAPPDATA%\ms-playwright, mas o Python procurava dentro da
+    # própria pasta do app). Fixando esse caminho explicitamente, os dois
+    # lados usam sempre o mesmo lugar.
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(BASE_DIR / "navegadores_playwright"))

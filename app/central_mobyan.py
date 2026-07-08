@@ -1615,7 +1615,10 @@ def instalar_chromium_com_progresso(root, ao_concluir):
 
     def worker():
         erro = None
-        log = ["Iniciando instalação do Chromium..."]
+        log = [
+            "Iniciando instalação do Chromium...",
+            f"PLAYWRIGHT_BROWSERS_PATH={os.environ.get('PLAYWRIGHT_BROWSERS_PATH', '(não definido)')}",
+        ]
         try:
             from playwright._impl._driver import compute_driver_executable, get_driver_env
             driver_executable, driver_cli = compute_driver_executable()
@@ -1652,7 +1655,9 @@ def instalar_chromium_com_progresso(root, ao_concluir):
                 try:
                     from playwright.sync_api import sync_playwright
                     with sync_playwright() as playwright:
-                        pasta_navegadores = Path(playwright.chromium.executable_path).parent.parent.parent
+                        caminho_esperado = Path(playwright.chromium.executable_path)
+                        log.append(f"executable_path esperado: {caminho_esperado}")
+                        pasta_navegadores = caminho_esperado.parent.parent
                         if pasta_navegadores.exists():
                             log.append(f"Conteúdo de {pasta_navegadores}:")
                             log.extend(f"  - {item.name}" for item in pasta_navegadores.iterdir())
