@@ -7,7 +7,7 @@ import pandas as pd
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR
 ARQUIVO_PLANILHA = BASE_DIR / "outputs" / "pendencias_do_dia" / "pendencias_do_dia_atual.xlsx"
 PASTA_PERFIL_WHATSAPP = BASE_DIR / "whatsapp_profile"
 PASTA_TEMP_WHATSAPP = BASE_DIR / "outputs" / "whatsapp_temp"

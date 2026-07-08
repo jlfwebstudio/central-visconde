@@ -7,7 +7,6 @@ import sys
 import time
 import unicodedata
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import pandas as pd
@@ -36,7 +35,7 @@ from baixar_relatorios_roteirizacao import (
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR
 load_dotenv(BASE_DIR / ".env")
 
 ARQUIVO_ROTEIRIZACAO = (
@@ -48,6 +47,10 @@ ARQUIVO_ROTEIRIZACAO = (
 PASTA_PDFS = BASE_DIR / "outputs" / "pdfs"
 PASTA_PDFS_TEMP = PASTA_PDFS / "_temporarios"
 PASTA_LOGS = BASE_DIR / "logs" / "pdfs"
+
+# Não é um técnico de campo: são OSs fora da área de atendimento, roteirizadas
+# para essa "gaveta" apenas para não travar a Gestão de Rotas. Não geram PDF.
+NOME_TECNICO_AJUSTE_MANUAL = "AJUSTE MANUAL"
 
 try:
     PDF_TIMEOUT_SEGUNDOS = int(
@@ -65,11 +68,14 @@ except ValueError:
 
 MOBYAN_TIMEOUT_POR_OS_SEGUNDOS = max(15, MOBYAN_TIMEOUT_POR_OS_SEGUNDOS)
 
-# O valor normalmente é detectado no HTML/URL da sessão. Este fallback é
-# utilizado apenas quando o sistema não expõe o parâmetro durante o login.
+# O valor normalmente é detectado sozinho no HTML/URL da sessão logo após o
+# login (capturar_sessao_mobyan). Esta variável só existe como fallback
+# explícito por conta, para o caso raro da detecção automática falhar — não
+# deve ter um valor padrão fixo aqui, pois cada conta/cliente tem o seu
+# próprio número e usar o de outra conta gera PDFs errados.
 MOBYAN_RELATORIO_USER = os.getenv(
     "MOBYAN_RELATORIO_USER",
-    "72107",
+    "",
 ).strip()
 
 
@@ -216,6 +222,51 @@ def ler_listas_pdf():
         )
 
     return listas
+
+
+def ler_contratantes_mobyan():
+    """OS -> Contratante (texto bruto) da aba 'Contratante Mobyan'.
+
+    Roteirizações antigas (geradas antes desta funcionalidade) não têm essa
+    aba: nesse caso devolve um mapa vazio e todas as OSs seguem pelo
+    caminho padrão da Getnet, exatamente como funcionava antes.
+    """
+    if not ARQUIVO_ROTEIRIZACAO.exists():
+        return {}
+
+    try:
+        df = pd.read_excel(
+            ARQUIVO_ROTEIRIZACAO,
+            sheet_name="Contratante Mobyan",
+            dtype=str,
+            keep_default_na=False,
+            na_filter=False,
+        )
+    except Exception:
+        return {}
+
+    mapa = {}
+    for _, linha in df.iterrows():
+        numero_os = str(linha.get("OS", "")).strip()
+        if numero_os:
+            mapa[numero_os] = str(linha.get("Contratante", "")).strip()
+    return mapa
+
+
+def identificar_contratante(valor):
+    """Classifica o texto do contratante em GETNET, PUNTO ou DESCONHECIDO.
+
+    Texto vazio é tratado como GETNET (comportamento de sempre, mantido
+    para roteirizações antigas ou OSs sem essa informação). Um valor não
+    vazio que não bate com nenhum dos dois é DESCONHECIDO — nesse caso não
+    arriscamos montar a URL errada, a OS fica para download manual.
+    """
+    texto = str(valor or "").strip().upper()
+    if "PUNTO" in texto:
+        return "PUNTO"
+    if not texto or "GETNET" in texto:
+        return "GETNET"
+    return "DESCONHECIDO"
 
 
 def resposta_e_pdf(resposta):
@@ -843,6 +894,21 @@ def montar_url_pdf_mobyan(sessao, usuario_relatorio, oss):
     )
 
 
+def montar_url_pdf_punto(sessao, usuario_relatorio, numero_os):
+    """URL de PDF das OSs da Punto: mesma sessão da Mobyan, endpoint e
+
+    parâmetros diferentes dos da Getnet (não usa reportName/ReportRDLC.aspx).
+    """
+    partes = urlsplit(MOBYAN_URL)
+
+    return (
+        f"{partes.scheme}://{partes.netloc}/{sessao}/"
+        "appdata/reportPDF.aspx"
+        f"?id={quote(str(numero_os))}&rdlc=0&param=0"
+        f"&lang=22&comp=3&user={quote(usuario_relatorio)}"
+    )
+
+
 def validar_pdf_baixado(caminho):
     """Confirma que o arquivo baixado é um PDF legível."""
     if not caminho.exists() or caminho.stat().st_size <= 0:
@@ -948,6 +1014,8 @@ def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
     preparar_pastas()
     pasta_destino.mkdir(parents=True, exist_ok=True)
 
+    contratantes_mobyan = ler_contratantes_mobyan()
+
     iniciado_em = datetime.now()
     falhas = []
     gerados = []
@@ -1016,17 +1084,48 @@ def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
 
                 for indice_os, numero_os in enumerate(oss, start=1):
                     os_processada += 1
+
+                    contratante = identificar_contratante(
+                        contratantes_mobyan.get(numero_os, "")
+                    )
+
+                    if contratante == "DESCONHECIDO":
+                        falhas.append({
+                            "tecnico": tecnico,
+                            "os": numero_os,
+                            "etapa": "identificação do contratante",
+                            "erro": (
+                                "Contratante não reconhecido "
+                                f"('{contratantes_mobyan.get(numero_os, '')}'). "
+                                "Baixe esta OS manualmente."
+                            ),
+                        })
+                        print(
+                            f"  [{os_processada}/{total_oss}] "
+                            f"OS {numero_os} ({indice_os}/{len(oss)}): "
+                            "IGNORADA | contratante não reconhecido, "
+                            "baixe manualmente."
+                        )
+                        continue
+
                     caminho_individual = (
                         pasta_tecnico
                         / f"{indice_os:03d} - OS {numero_os}.pdf"
                     )
-                    url = montar_url_pdf_mobyan(
-                        sessao,
-                        usuario_relatorio,
-                        [numero_os],
-                    )
+                    if contratante == "PUNTO":
+                        url = montar_url_pdf_punto(
+                            sessao,
+                            usuario_relatorio,
+                            numero_os,
+                        )
+                    else:
+                        url = montar_url_pdf_mobyan(
+                            sessao,
+                            usuario_relatorio,
+                            [numero_os],
+                        )
                     descricao = (
-                        f"Mobyan - {tecnico} - OS {numero_os}"
+                        f"Mobyan ({contratante}) - {tecnico} - OS {numero_os}"
                     )
 
                     print(
@@ -1139,7 +1238,7 @@ def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
     falhas_individuais = sum(
         1
         for falha in falhas
-        if falha["etapa"] == "geração individual"
+        if falha["etapa"] in ("geração individual", "identificação do contratante")
     )
 
     print("")
@@ -1722,6 +1821,13 @@ def main():
         limpar_pdfs_antigos()
 
     listas = ler_listas_pdf()
+
+    if not args.tecnico:
+        listas = [
+            item
+            for item in listas
+            if item["tecnico"].strip().upper() != NOME_TECNICO_AJUSTE_MANUAL
+        ]
 
     if args.tecnico:
         tecnico_procurado = normalizar_texto(

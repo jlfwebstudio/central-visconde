@@ -5,13 +5,12 @@ import time
 import unicodedata
 import zipfile
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR
 
 PASTA_DOWNLOADS_ROTEIRO = BASE_DIR / "downloads" / "roteirizacao"
 PASTA_DOWNLOADS_MOBYAN = PASTA_DOWNLOADS_ROTEIRO / "mobyan"
@@ -42,6 +41,11 @@ try:
     )
 except ValueError:
     OGEA_TIMEOUT_CARREGAMENTO = 300
+
+# Preservados para não quebrar a instalação atual (RS-SMART/SMART TECNOLOGIA):
+# contas novas configuram os próprios valores via MOBYAN_PRESTADORES/OGEA_PRESTADOR.
+MOBYAN_PRESTADOR_PRINCIPAL = os.getenv("MOBYAN_PRESTADORES", "RS-SMART").split(",")[0].strip() or "RS-SMART"
+OGEA_PRESTADOR = os.getenv("OGEA_PRESTADOR", "SMART TECNOLOGIA").strip() or "SMART TECNOLOGIA"
 
 
 def normalizar_texto(valor):
@@ -209,8 +213,9 @@ def aguardar_pagina_ogea(
 # MOBYAN
 # ---------------------------------------------------------------------------
 
-def selecionar_apenas_rs_smart(frame_relatorio):
-    print("Selecionando somente o prestador RS-SMART...")
+def selecionar_apenas_rs_smart(frame_relatorio, prestador=None):
+    prestador = prestador or MOBYAN_PRESTADOR_PRINCIPAL
+    print(f"Selecionando somente o prestador {prestador}...")
 
     frame_relatorio.get_by_role(
         "cell",
@@ -222,11 +227,11 @@ def selecionar_apenas_rs_smart(frame_relatorio):
     for tentativa in [
         lambda: frame_relatorio.get_by_role(
             "checkbox",
-            name="RS-SMART",
+            name=prestador,
             exact=True,
         ).check(timeout=5000),
         lambda: frame_relatorio.locator("label").filter(
-            has_text=re.compile(r"^RS-SMART$")
+            has_text=re.compile(rf"^{re.escape(prestador)}$")
         ).click(timeout=5000),
     ]:
         try:
@@ -238,7 +243,7 @@ def selecionar_apenas_rs_smart(frame_relatorio):
 
     if not marcado:
         raise RuntimeError(
-            "Não consegui marcar somente o prestador RS-SMART na Mobyan."
+            f"Não consegui marcar somente o prestador {prestador} na Mobyan."
         )
 
     try:
@@ -246,7 +251,7 @@ def selecionar_apenas_rs_smart(frame_relatorio):
     except Exception:
         pass
 
-    print("Prestador marcado: RS-SMART")
+    print(f"Prestador marcado: {prestador}")
 
 
 def baixar_relatorio_mobyan():
@@ -456,8 +461,9 @@ def abrir_ordem_servico_ogea(page):
     print("Tela Ordem de Serviço carregada.")
 
 
-def selecionar_prestador_ogea(page):
-    print("Selecionando prestador SMART TECNOLOGIA...")
+def selecionar_prestador_ogea(page, prestador=None):
+    prestador = prestador or OGEA_PRESTADOR
+    print(f"Selecionando prestador {prestador}...")
 
     # Seletores gravados diretamente pelo Playwright Codegen.
     lista_prestador = page.get_by_role("list").nth(4)
@@ -472,19 +478,19 @@ def selecionar_prestador_ogea(page):
         campo_busca,
         "campo de busca do Prestador",
     )
-    campo_busca.fill("tec")
+    campo_busca.fill(prestador)
 
-    opcao_smart = page.get_by_role(
+    opcao_prestador = page.get_by_role(
         "treeitem",
-        name="SMART TECNOLOGIA",
+        name=prestador,
     )
     esperar_elemento_ogea(
-        opcao_smart,
-        "opção SMART TECNOLOGIA",
+        opcao_prestador,
+        f"opção {prestador}",
     )
-    opcao_smart.click()
+    opcao_prestador.click()
 
-    print("Prestador selecionado: SMART TECNOLOGIA")
+    print(f"Prestador selecionado: {prestador}")
 
 
 def preencher_periodo_ogea(page):

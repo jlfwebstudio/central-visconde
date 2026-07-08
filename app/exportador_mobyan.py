@@ -15,12 +15,41 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from PIL import Image, ImageDraw, ImageFont
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR
 load_dotenv(BASE_DIR / ".env")
 
 MOBYAN_URL = os.getenv("MOBYAN_URL")
 MOBYAN_USUARIO = os.getenv("MOBYAN_USUARIO")
 MOBYAN_SENHA = os.getenv("MOBYAN_SENHA")
+
+
+def _lista_a_partir_do_env(nome_var, padrao):
+    valor = os.getenv(nome_var, "").strip()
+    if not valor:
+        return padrao
+    return [item.strip() for item in valor.split(",") if item.strip()]
+
+
+# Lista padrão preservada para não quebrar a instalação atual (RS-SMART): contas
+# novas configuram os próprios prestadores/estado via MOBYAN_PRESTADORES/MOBYAN_ESTADO.
+_PRESTADORES_RS_SMART_PADRAO = [
+    "RS-SMART",
+    "RS-SMART - CAXIAS DO SUL",
+    "RS-SMART - CAPAO DA CANOA",
+    "RS-SMART - PASSO FUNDO",
+    "RS-SMART - PELOTAS",
+    "RS-SMART - SANTA MARIA",
+    "RS-SMART - SANTA CRUZ DO SUL",
+    "RS-SMART - SANTA VITORIA DO",
+    "RS-SMART - SANTANA DO",
+    "RS-SMART - SANTO ANGELO",
+    "RS-SMART - URUGUAIANA",
+    "RS-SMART - VALE DOS SINOS",
+    "RS-SMART TAPES",
+]
+
+MOBYAN_PRESTADORES = _lista_a_partir_do_env("MOBYAN_PRESTADORES", _PRESTADORES_RS_SMART_PADRAO)
+MOBYAN_ESTADO = os.getenv("MOBYAN_ESTADO", "RS").strip() or "RS"
 
 PASTA_DOWNLOADS = BASE_DIR / "downloads" / "relatorios_completos"
 PASTA_PENDENCIAS = BASE_DIR / "outputs" / "pendencias_do_dia"
@@ -208,47 +237,40 @@ def selecionar_status(frame_relatorio):
     frame_relatorio.locator("html").click()
 
 
-def selecionar_prestadores(frame_relatorio):
-    print("Selecionando prestadores RS-SMART...")
+def selecionar_prestadores(frame_relatorio, prestadores=None):
+    prestadores = prestadores if prestadores is not None else MOBYAN_PRESTADORES
+
+    if not prestadores:
+        print("Nenhum prestador configurado para filtrar — pulando seleção de prestador.")
+        return
+
+    principal, *filiais = prestadores
+
+    print(f"Selecionando prestadores: {', '.join(prestadores)}")
 
     frame_relatorio.get_by_role("cell", name="Prestador").get_by_role("button").click()
 
     try:
         frame_relatorio.get_by_role(
             "checkbox",
-            name="RS-SMART",
+            name=principal,
             exact=True
         ).check(timeout=3000)
 
-        print("Prestador marcado: RS-SMART")
+        print(f"Prestador marcado: {principal}")
 
     except Exception:
         try:
             frame_relatorio.locator("label").filter(
-                has_text=re.compile(r"^RS-SMART$")
+                has_text=re.compile(rf"^{re.escape(principal)}$")
             ).click(timeout=3000)
 
-            print("Prestador marcado por label: RS-SMART")
+            print(f"Prestador marcado por label: {principal}")
 
         except Exception as erro:
-            print(f"Aviso: não consegui marcar o prestador RS-SMART. Erro: {erro}")
+            print(f"Aviso: não consegui marcar o prestador {principal}. Erro: {erro}")
 
-    prestadores = [
-        "RS-SMART - CAXIAS DO SUL",
-        "RS-SMART - CAPAO DA CANOA",
-        "RS-SMART - PASSO FUNDO",
-        "RS-SMART - PELOTAS",
-        "RS-SMART - SANTA MARIA",
-        "RS-SMART - SANTA CRUZ DO SUL",
-        "RS-SMART - SANTA VITORIA DO",
-        "RS-SMART - SANTANA DO",
-        "RS-SMART - SANTO ANGELO",
-        "RS-SMART - URUGUAIANA",
-        "RS-SMART - VALE DOS SINOS",
-        "RS-SMART TAPES",
-    ]
-
-    for prestador in prestadores:
+    for prestador in filiais:
         try:
             frame_relatorio.get_by_role(
                 "checkbox",
@@ -266,14 +288,15 @@ def selecionar_prestadores(frame_relatorio):
     frame_relatorio.locator("html").click()
 
 
-def selecionar_estado_rs(frame_relatorio):
-    print("Selecionando estado RS...")
+def selecionar_estado_rs(frame_relatorio, estado=None):
+    estado = estado if estado is not None else MOBYAN_ESTADO
+    print(f"Selecionando estado {estado}...")
 
     frame_relatorio.locator("#TD_STATE_NAME").get_by_role("button").filter(
         has_text=re.compile(r"^$")
     ).click()
 
-    frame_relatorio.get_by_role("checkbox", name="RS").check()
+    frame_relatorio.get_by_role("checkbox", name=estado).check()
     frame_relatorio.locator("html").click()
 
 
@@ -1000,6 +1023,11 @@ def obter_top(df, coluna, total_pendencias, limite=5, ignorar_vazio=True):
     return resumo.head(limite)
 
 
+# ATENÇÃO: a lógica de desenho das imagens por prestador daqui até
+# gerar_imagens_por_prestador() tem uma cópia paralela e intencional em
+# gerar_imagens_prestadores.py, usada para regerar as imagens manualmente a
+# partir da planilha já salva, sem re-raspar a Mobyan. Se mudar o layout ou
+# as cores aqui, replique lá também.
 def carregar_fonte_imagem(tamanho=14, negrito=False):
     caminhos = []
 
@@ -1303,24 +1331,23 @@ def criar_aba_resumo(writer, df_pendencias, df_acompanhamento=None):
         else 0
     )
 
+    # Base própria do Acompanhamento (exclui OSs de bobina) — usada para as %
+    # de "Em Risco"/"Controladas", que não pertencem ao universo de total_pendencias.
+    total_acompanhamento = len(df_acompanhamento) if df_acompanhamento is not None else 0
+
     if df_acompanhamento is None or df_acompanhamento.empty:
-        total_sem_retorno = 0
         total_em_risco = 0
         total_controladas = 0
-        top_status_operacional = pd.DataFrame(columns=["Status Operacional", "Quantidade", "%"])
-        top_risco = pd.DataFrame(columns=["Risco", "Quantidade", "%"])
     else:
         if "Status Operacional" in df_acompanhamento.columns:
             status_operacional = df_acompanhamento["Status Operacional"].fillna("").astype(str).str.strip()
         else:
             status_operacional = pd.Series([""] * len(df_acompanhamento), index=df_acompanhamento.index)
 
-        # Compatibilidade com a versão compacta:
-        # versões antigas tinham a coluna "Risco" separada;
-        # a v5 juntou "Risco" e "Ação Necessária" em "Risco / Ação" para ganhar espaço visual.
+        # Compatibilidade com versões antigas que juntavam "Risco" e "Ação
+        # Necessária" em uma única coluna "Risco / Ação".
         if "Risco" in df_acompanhamento.columns:
             risco = df_acompanhamento["Risco"].fillna("").astype(str).str.strip().str.upper()
-            df_top_risco = df_acompanhamento.copy()
         elif "Risco / Ação" in df_acompanhamento.columns:
             risco = (
                 df_acompanhamento["Risco / Ação"]
@@ -1331,14 +1358,9 @@ def criar_aba_resumo(writer, df_pendencias, df_acompanhamento=None):
                 .str.strip()
                 .str.upper()
             )
-            df_top_risco = df_acompanhamento.copy()
-            df_top_risco["Risco"] = risco
         else:
             risco = pd.Series([""] * len(df_acompanhamento), index=df_acompanhamento.index)
-            df_top_risco = df_acompanhamento.copy()
-            df_top_risco["Risco"] = risco
 
-        total_sem_retorno = len(df_acompanhamento[status_operacional == "Sem retorno"])
         total_em_risco = len(df_acompanhamento[risco.isin(["CRÍTICO", "ALTO RISCO", "ABONAR"])])
         total_controladas = len(
             df_acompanhamento[
@@ -1351,90 +1373,36 @@ def criar_aba_resumo(writer, df_pendencias, df_acompanhamento=None):
             ]
         )
 
-        top_status_operacional = obter_top(
-            df_acompanhamento,
-            "Status Operacional",
-            max(len(df_acompanhamento), 1),
-            limite=5,
-        )
-        top_risco = obter_top(
-            df_top_risco,
-            "Risco",
-            max(len(df_top_risco), 1),
-            limite=5,
-        )
-
-    def pct(valor):
-        if total_pendencias == 0:
+    def pct(valor, base):
+        if base == 0:
             return 0
-        return valor / total_pendencias
+        return valor / base
 
     cards = pd.DataFrame([
         ["Total de Pendências", total_pendencias, 1 if total_pendencias > 0 else 0],
-        ["Vencidas", total_vencidas, pct(total_vencidas)],
-        ["Vence Hoje", total_vence_hoje, pct(total_vence_hoje)],
-        ["Falta Abonar", total_falta_abonar, pct(total_falta_abonar)],
-        ["Sem Retorno", total_sem_retorno, pct(total_sem_retorno)],
-        ["Em Risco", total_em_risco, pct(total_em_risco)],
-        ["Controladas", total_controladas, pct(total_controladas)],
+        ["Vencidas", total_vencidas, pct(total_vencidas, total_pendencias)],
+        ["Vence Hoje", total_vence_hoje, pct(total_vence_hoje, total_pendencias)],
+        ["Falta Abonar", total_falta_abonar, pct(total_falta_abonar, total_pendencias)],
+        ["Em Risco", total_em_risco, pct(total_em_risco, total_acompanhamento)],
+        ["Controladas", total_controladas, pct(total_controladas, total_acompanhamento)],
     ], columns=["Indicador", "Quantidade", "%"])
 
     top_prestador = obter_top(df_pendencias, "Prestador", total_pendencias, limite=5)
     top_cidade = obter_top(df_pendencias, "Cidade", total_pendencias, limite=5)
-    top_justificativa = obter_top(df_pendencias, "Justificativa do Abono", total_pendencias, limite=5)
-
-    ofensores = []
-
-    if not top_prestador.empty:
-        linha = top_prestador.iloc[0]
-        ofensores.append(["Principal Prestador", linha["Prestador"], linha["Quantidade"], linha["%"]])
-    else:
-        ofensores.append(["Principal Prestador", "-", 0, 0])
-
-    if not top_cidade.empty:
-        linha = top_cidade.iloc[0]
-        ofensores.append(["Principal Cidade", linha["Cidade"], linha["Quantidade"], linha["%"]])
-    else:
-        ofensores.append(["Principal Cidade", "-", 0, 0])
-
-    if not top_justificativa.empty:
-        linha = top_justificativa.iloc[0]
-        ofensores.append(["Principal Justificativa", linha["Justificativa do Abono"], linha["Quantidade"], linha["%"]])
-    else:
-        ofensores.append(["Principal Justificativa", "-", 0, 0])
-
-    if not top_risco.empty:
-        linha = top_risco.iloc[0]
-        ofensores.append(["Principal Risco", linha["Risco"], linha["Quantidade"], linha["%"]])
-    else:
-        ofensores.append(["Principal Risco", "-", 0, 0])
-
-    df_ofensores = pd.DataFrame(ofensores, columns=["Indicador", "Ofensor", "Quantidade", "%"])
 
     sheet_name = "Resumo"
 
     cards.to_excel(writer, index=False, sheet_name=sheet_name, startrow=2, startcol=0)
-    df_ofensores.to_excel(writer, index=False, sheet_name=sheet_name, startrow=2, startcol=5)
 
     pd.DataFrame([["Top 5 Prestadores"]]).to_excel(
-        writer, index=False, header=False, sheet_name=sheet_name, startrow=12, startcol=0
+        writer, index=False, header=False, sheet_name=sheet_name, startrow=11, startcol=0
     )
-    top_prestador.to_excel(writer, index=False, sheet_name=sheet_name, startrow=13, startcol=0)
+    top_prestador.to_excel(writer, index=False, sheet_name=sheet_name, startrow=12, startcol=0)
 
     pd.DataFrame([["Top 5 Cidades"]]).to_excel(
-        writer, index=False, header=False, sheet_name=sheet_name, startrow=12, startcol=5
+        writer, index=False, header=False, sheet_name=sheet_name, startrow=11, startcol=5
     )
-    top_cidade.to_excel(writer, index=False, sheet_name=sheet_name, startrow=13, startcol=5)
-
-    pd.DataFrame([["Top 5 Justificativas"]]).to_excel(
-        writer, index=False, header=False, sheet_name=sheet_name, startrow=22, startcol=0
-    )
-    top_justificativa.to_excel(writer, index=False, sheet_name=sheet_name, startrow=23, startcol=0)
-
-    pd.DataFrame([["Top 5 Status Operacional"]]).to_excel(
-        writer, index=False, header=False, sheet_name=sheet_name, startrow=22, startcol=5
-    )
-    top_status_operacional.to_excel(writer, index=False, sheet_name=sheet_name, startrow=23, startcol=5)
+    top_cidade.to_excel(writer, index=False, sheet_name=sheet_name, startrow=12, startcol=5)
 
 def preparar_dataframe_final(df, hoje):
     colunas_desejadas = [
@@ -2364,6 +2332,24 @@ def formatar_aba_acompanhamento(caminho_xlsx, layout_anterior=None):
                 wrap_text=True,
             )
 
+    # SITUAÇÃO, Risco e Ação Necessária já ficam visíveis pela cor da linha/célula
+    # aplicada acima (vermelho/amarelo/verde), então o texto vira ruído na leitura
+    # diária. Removemos as colunas só depois de usar os valores para colorir.
+    colunas_para_remover = sorted(
+        {indice for indice in (col_acao, col_risco, col_situacao) if indice},
+        reverse=True,
+    )
+    for indice in colunas_para_remover:
+        ws.delete_cols(indice)
+
+    max_col = ws.max_column
+    headers = [cell.value for cell in ws[1]]
+    ws.auto_filter.ref = ws.dimensions
+
+    col_status_operacional = headers.index("Status Operacional") + 1 if "Status Operacional" in headers else None
+    col_previsao = headers.index("Previsão") + 1 if "Previsão" in headers else None
+    col_ultimo_retorno = headers.index("Último Retorno") + 1 if "Último Retorno" in headers else None
+
     max_row_validacao = max(max_row + 300, 500)
 
     if col_status_operacional:
@@ -2912,26 +2898,24 @@ def formatar_aba_resumo(caminho_xlsx):
     )
 
     ws.insert_rows(1, 1)
-    ws["A1"] = "DASHBOARD DE PENDÊNCIAS E ACOMPANHAMENTO"
-    ws.merge_cells("A1:I1")
+
+    for row in range(1, 20):
+        ws.row_dimensions[row].height = 22
+
+    ws["A1"] = "PENDÊNCIAS DE HOJE"
+    ws.merge_cells("A1:H1")
     ws["A1"].fill = azul
     ws["A1"].font = Font(color="FFFFFF", bold=True, size=16)
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 28
 
-    ws["A2"] = "Indicadores gerais"
+    ws["A2"] = "Indicadores do dia"
     ws.merge_cells("A2:C2")
     ws["A2"].fill = cinza
     ws["A2"].font = fonte_negrito
     ws["A2"].alignment = Alignment(horizontal="center")
 
-    ws["F2"] = "Principais ofensores"
-    ws.merge_cells("F2:I2")
-    ws["F2"].fill = cinza
-    ws["F2"].font = fonte_negrito
-    ws["F2"].alignment = Alignment(horizontal="center")
-
-    for row in range(4, 11):
+    for row in range(5, 11):
         indicador = ws.cell(row=row, column=1).value
 
         if indicador == "Total de Pendências":
@@ -2940,7 +2924,7 @@ def formatar_aba_resumo(caminho_xlsx):
         elif indicador in ["Vencidas", "Falta Abonar", "Em Risco"]:
             fill_nome = vermelho
             fill_valor = vermelho_claro
-        elif indicador in ["Vence Hoje", "Sem Retorno"]:
+        elif indicador == "Vence Hoje":
             fill_nome = amarelo
             fill_valor = amarelo_claro
         elif indicador == "Controladas":
@@ -2952,7 +2936,7 @@ def formatar_aba_resumo(caminho_xlsx):
 
         ws.cell(row=row, column=1).fill = fill_nome
         ws.cell(row=row, column=1).font = fonte_branca
-        ws.cell(row=row, column=1).alignment = Alignment(horizontal="center", vertical="center")
+        ws.cell(row=row, column=1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
 
         ws.cell(row=row, column=2).fill = fill_valor
         ws.cell(row=row, column=2).font = fonte_card_numero
@@ -2966,22 +2950,15 @@ def formatar_aba_resumo(caminho_xlsx):
         for col in range(1, 4):
             ws.cell(row=row, column=col).border = borda
 
-    for row in range(4, 8):
-        for col in range(6, 10):
-            cell = ws.cell(row=row, column=col)
-            cell.fill = azul_claro
-            cell.border = borda
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.row_dimensions[row].height = 26
 
-        ws.cell(row=row, column=6).fill = azul
-        ws.cell(row=row, column=6).font = fonte_branca
-        ws.cell(row=row, column=9).number_format = "0.0%"
+    # Linha 4: cabeçalho técnico escrito pelo pandas (Indicador/Quantidade/%).
+    # Os cards acima já são autoexplicativos, então essa linha só é ruído — fica oculta.
+    ws.row_dimensions[4].hidden = True
 
     titulos_tabelas = [
         ("A13:C13", "Top 5 Prestadores"),
         ("F13:H13", "Top 5 Cidades"),
-        ("A23:C23", "Top 5 Justificativas"),
-        ("F23:H23", "Top 5 Status Operacional"),
     ]
 
     for intervalo, titulo in titulos_tabelas:
@@ -2992,17 +2969,16 @@ def formatar_aba_resumo(caminho_xlsx):
         ws[celula_inicio].font = fonte_titulo
         ws[celula_inicio].alignment = Alignment(horizontal="center", vertical="center")
 
-    header_rows = [14, 24]
+    header_row = 14
 
-    for row in header_rows:
-        for col in [1, 2, 3, 6, 7, 8]:
-            cell = ws.cell(row=row, column=col)
-            cell.fill = verde
-            cell.font = fonte_branca
-            cell.border = borda
-            cell.alignment = Alignment(horizontal="center", vertical="center")
+    for col in [1, 2, 3, 6, 7, 8]:
+        cell = ws.cell(row=header_row, column=col)
+        cell.fill = verde
+        cell.font = fonte_branca
+        cell.border = borda
+        cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    for row in list(range(15, 20)) + list(range(25, 30)):
+    for row in range(15, 20):
         for col in [1, 2, 3, 6, 7, 8]:
             cell = ws.cell(row=row, column=col)
             cell.fill = branco
@@ -3012,10 +2988,6 @@ def formatar_aba_resumo(caminho_xlsx):
             if col in [3, 8]:
                 cell.number_format = "0.0%"
 
-    for cell in ws["I"]:
-        if isinstance(cell.value, float):
-            cell.number_format = "0.0%"
-
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 14
     ws.column_dimensions["C"].width = 12
@@ -3024,10 +2996,6 @@ def formatar_aba_resumo(caminho_xlsx):
     ws.column_dimensions["F"].width = 30
     ws.column_dimensions["G"].width = 14
     ws.column_dimensions["H"].width = 12
-    ws.column_dimensions["I"].width = 12
-
-    for row in range(1, 32):
-        ws.row_dimensions[row].height = 22
 
     ws.sheet_view.showGridLines = False
 

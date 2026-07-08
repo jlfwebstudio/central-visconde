@@ -3,12 +3,17 @@ import os
 import sys
 import queue
 import subprocess
+import tempfile
 import threading
 import tkinter as tk
+from datetime import date, datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 try:
     from PIL import Image, ImageTk
@@ -22,17 +27,24 @@ except Exception:
     abrir_gestao_rotas = None
     obter_resumo_rotas = None
 
+from autenticacao import (
+    baixar_atualizacao,
+    carregar_sessao_local,
+    garantir_sessao_valida,
+    limpar_sessao_local,
+    verificar_atualizacao,
+)
+from caminho_base import BASE_DIR, FROZEN, RECURSOS_DIR
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-SCRIPT_GERAR_PENDENCIAS = BASE_DIR / "app" / "exportador_mobyan.py"
-SCRIPT_ENVIAR_WHATSAPP = BASE_DIR / "app" / "enviar_whatsapp.py"
-SCRIPT_GERAR_ROTEIRIZACAO = BASE_DIR / "app" / "gerar_roteirizacao.py"
-SCRIPT_GERAR_PDFS = BASE_DIR / "app" / "gerar_pdfs.py"
-SCRIPT_ANALISAR_ABONOS = BASE_DIR / "app" / "analisar_abonos_ogea.py"
-SCRIPT_GERAR_OS_VISCONDE_TESTE = BASE_DIR / "app" / "gerar_os_visconde_teste.py"
+SCRIPT_GERAR_PENDENCIAS = RECURSOS_DIR / "app" / "exportador_mobyan.py"
+SCRIPT_ENVIAR_WHATSAPP = RECURSOS_DIR / "app" / "enviar_whatsapp.py"
+SCRIPT_GERAR_ROTEIRIZACAO = RECURSOS_DIR / "app" / "gerar_roteirizacao.py"
+SCRIPT_GERAR_PDFS = RECURSOS_DIR / "app" / "gerar_pdfs.py"
+SCRIPT_ANALISAR_ABONOS = RECURSOS_DIR / "app" / "analisar_abonos_ogea.py"
+SCRIPT_GERAR_OS_VISCONDE_TESTE = RECURSOS_DIR / "app" / "gerar_os_visconde_teste.py"
 
 ARQUIVO_PLANILHA = BASE_DIR / "outputs" / "pendencias_do_dia" / "pendencias_do_dia_atual.xlsx"
+PASTA_FILTROS_PAINEL = BASE_DIR / "outputs" / "pendencias_do_dia" / "filtros_painel"
 ARQUIVO_ROTEIRIZACAO = BASE_DIR / "outputs" / "roteirizacao" / "roteirizacao_atual.xlsx"
 ARQUIVO_ABONOS = BASE_DIR / "outputs" / "abonos_ogea" / "analise_abonos_ogea_atual.xlsx"
 ARQUIVO_REGRAS_ROTEIRIZACAO = BASE_DIR / "bases" / "regras_roteirizacao.xlsx"
@@ -41,9 +53,9 @@ PASTA_PDFS = BASE_DIR / "outputs" / "pdfs"
 PASTA_ABONOS = BASE_DIR / "outputs" / "abonos_ogea"
 PASTA_OS_VISCONDE_TESTE = BASE_DIR / "outputs" / "os_visconde_teste"
 PASTA_LOGS = BASE_DIR / "logs"
-ARQUIVO_LOGO = BASE_DIR / "assets" / "logo_visconde.png"
-ARQUIVO_ICONE_PNG = BASE_DIR / "assets" / "logo_visconde_app.png"
-ARQUIVO_ICONE_ICO = BASE_DIR / "assets" / "logo_visconde.ico"
+ARQUIVO_LOGO = RECURSOS_DIR / "assets" / "logo_visconde.png"
+ARQUIVO_ICONE_PNG = RECURSOS_DIR / "assets" / "logo_visconde_app.png"
+ARQUIVO_ICONE_ICO = RECURSOS_DIR / "assets" / "logo_visconde.ico"
 
 
 
@@ -268,15 +280,24 @@ class ActionCard(tk.Frame):
         self.descricao.config(cursor=cursor, bg=COR_CARD if enabled else "#252525")
         self.faixa.config(bg=cor)
 
+    def definir_conteudo(self, titulo, descricao, comando, destaque=None, destaque_hover=None):
+        self.comando = comando
+        self.titulo.config(text=titulo)
+        self.descricao.config(text=descricao)
+        if destaque:
+            self.destaque = destaque
+            self.destaque_hover = destaque_hover or destaque
+            self.faixa.config(bg=self.destaque)
+
 
 class SmallButton(tk.Frame):
-    def __init__(self, master, texto, comando, largura=170):
+    def __init__(self, master, texto, comando, largura=170, altura=42):
         super().__init__(master, bg=COR_FUNDO_2)
         self.comando = comando
         self.container = tk.Frame(
             self,
             bg=COR_CARD,
-            height=42,
+            height=altura,
             width=largura,
             cursor="hand2",
             highlightbackground=COR_BORDA,
@@ -289,8 +310,10 @@ class SmallButton(tk.Frame):
             text=texto,
             bg=COR_CARD,
             fg=COR_BRANCO,
-            font=("Arial", 10, "bold"),
+            font=("Arial", 9, "bold"),
             cursor="hand2",
+            wraplength=largura - 16,
+            justify="center",
         )
         self.label.pack(expand=True)
         for widget in [self.container, self.label]:
@@ -308,19 +331,23 @@ class SmallButton(tk.Frame):
 
 
 class MetricCard(tk.Frame):
-    def __init__(self, master, titulo, valor="0", cor=COR_DOURADO):
+    def __init__(self, master, titulo, valor="0", cor=COR_DOURADO, subtitulo="", tamanho_valor=23, comando=None):
+        cursor = "hand2" if comando else "arrow"
         super().__init__(
             master,
             bg=COR_CARD,
             highlightbackground=COR_BORDA,
             highlightthickness=1,
+            cursor=cursor,
         )
+        self.comando = comando
         self.label_titulo = tk.Label(
             self,
             text=titulo,
             bg=COR_CARD,
             fg=COR_TEXTO_SECUNDARIO,
             font=("Arial", 10, "bold"),
+            cursor=cursor,
         )
         self.label_titulo.pack(pady=(12, 4))
         self.label_valor = tk.Label(
@@ -328,14 +355,53 @@ class MetricCard(tk.Frame):
             text=valor,
             bg=COR_CARD,
             fg=cor,
-            font=("Arial", 23, "bold"),
+            font=("Arial", tamanho_valor, "bold"),
+            wraplength=220,
+            justify="center",
+            cursor=cursor,
         )
-        self.label_valor.pack(pady=(0, 12))
+        self.label_valor.pack(pady=(0, 2 if subtitulo else 12))
+        self.label_subtitulo = tk.Label(
+            self,
+            text=subtitulo,
+            bg=COR_CARD,
+            fg=COR_TEXTO_FRACO,
+            font=("Arial", 9),
+            cursor=cursor,
+        )
+        if subtitulo:
+            self.label_subtitulo.pack(pady=(0, 12))
+        if comando:
+            for widget in (self, self.label_titulo, self.label_valor, self.label_subtitulo):
+                widget.bind("<Button-1>", lambda event: self.comando())
+                widget.bind("<Enter>", self.entrar)
+                widget.bind("<Leave>", self.sair)
 
-    def atualizar(self, valor, cor=None):
+    def entrar(self, event=None):
+        self.config(highlightbackground=COR_DOURADO)
+        for widget in (self, self.label_titulo, self.label_valor, self.label_subtitulo):
+            widget.config(bg=COR_CARD_HOVER)
+
+    def sair(self, event=None):
+        self.config(highlightbackground=COR_BORDA)
+        for widget in (self, self.label_titulo, self.label_valor, self.label_subtitulo):
+            widget.config(bg=COR_CARD)
+
+    def atualizar(self, valor, cor=None, subtitulo=None):
         self.label_valor.config(text=str(valor))
         if cor:
             self.label_valor.config(fg=cor)
+        if subtitulo is not None:
+            if subtitulo:
+                self.label_subtitulo.config(text=subtitulo)
+                if not self.label_subtitulo.winfo_manager():
+                    self.label_valor.pack_configure(pady=(0, 2))
+                    self.label_subtitulo.pack(pady=(0, 12))
+            else:
+                self.label_subtitulo.config(text="")
+                if self.label_subtitulo.winfo_manager():
+                    self.label_subtitulo.pack_forget()
+                    self.label_valor.pack_configure(pady=(0, 12))
 
 
 class CentralVisconde:
@@ -359,6 +425,7 @@ class CentralVisconde:
         self.paginas = {}
         self.nav_botoes = {}
         self.logo_image = None
+        self.ultimo_prestador_top = None
 
         PASTA_LOGS.mkdir(parents=True, exist_ok=True)
         PASTA_ABONOS.mkdir(parents=True, exist_ok=True)
@@ -417,13 +484,10 @@ class CentralVisconde:
         tk.Frame(self.sidebar, bg=COR_BORDA, height=1).pack(fill="x", padx=18, pady=(0, 15))
 
         itens = [
-            ("inicio", "Visão Geral"),
-            ("operacao", "Pendências e WhatsApp"),
-            ("roteiros", "Roteirização e PDFs"),
-            ("rotas", "Gestão de Rotas"),
-            ("os_teste", "OS Visconde - Piloto"),
-            ("abonos", "Analista de Abonos"),
-            ("sistema", "Arquivos e Sistema"),
+            ("inicio", "Painel"),
+            ("operacao", "Operação"),
+            ("roteiros", "Roteiros"),
+            ("ferramentas", "Abono OGEA"),
         ]
         for chave, texto in itens:
             botao = NavButton(self.sidebar, texto, lambda c=chave: self.mostrar_pagina(c))
@@ -446,6 +510,27 @@ class CentralVisconde:
             fg=COR_TEXTO_FRACO,
             font=("Arial", 9),
         ).pack(anchor="w", pady=(2, 0))
+
+        sessao_atual = carregar_sessao_local()
+        if sessao_atual:
+            tk.Label(
+                rodape,
+                text=f"Conta: {sessao_atual.get('usuario', '')}",
+                bg=COR_FUNDO,
+                fg=COR_TEXTO_FRACO,
+                font=("Arial", 8),
+            ).pack(anchor="w", pady=(10, 0))
+
+            link_sair = tk.Label(
+                rodape,
+                text="Sair da conta",
+                bg=COR_FUNDO,
+                fg=COR_DOURADO,
+                font=("Arial", 9, "underline"),
+                cursor="hand2",
+            )
+            link_sair.pack(anchor="w", pady=(2, 0))
+            link_sair.bind("<Button-1>", lambda _evento: self.sair_da_conta())
 
     def montar_main(self):
         header = tk.Frame(self.main, bg=COR_FUNDO_2)
@@ -475,10 +560,7 @@ class CentralVisconde:
         self.criar_pagina_inicio()
         self.criar_pagina_operacao()
         self.criar_pagina_roteiros()
-        self.criar_pagina_gestao_rotas()
-        self.criar_pagina_os_teste()
-        self.criar_pagina_abonos()
-        self.criar_pagina_sistema()
+        self.criar_pagina_ferramentas()
 
         status_frame = tk.Frame(self.main, bg=COR_FUNDO_2)
         status_frame.pack(fill="x", padx=26, pady=(0, 8))
@@ -538,51 +620,83 @@ class CentralVisconde:
         self.escrever_log("Escolha uma área no menu lateral.\n")
 
     def nova_pagina(self, chave):
-        pagina = tk.Frame(self.page_host, bg=COR_FUNDO_2)
-        pagina.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.paginas[chave] = pagina
+        """Cria uma página rolável: cada seção pode crescer sem sobrepor o rodapé."""
+        wrapper = tk.Frame(self.page_host, bg=COR_FUNDO_2)
+        wrapper.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        canvas = tk.Canvas(wrapper, bg=COR_FUNDO_2, highlightthickness=0)
+        scrollbar = tk.Scrollbar(wrapper, orient="vertical", command=canvas.yview)
+        pagina = tk.Frame(canvas, bg=COR_FUNDO_2)
+
+        pagina.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        janela_id = canvas.create_window((0, 0), window=pagina, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(janela_id, width=e.width))
+
+        def rolar(event):
+            passos = int(-1 * (event.delta / 120)) if os.name == "nt" else int(-1 * event.delta)
+            canvas.yview_scroll(passos, "units")
+
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", rolar))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        canvas.bind("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self.paginas[chave] = wrapper
         return pagina
 
     def registrar_action(self, botao):
         self.botoes_processo.append(botao)
         return botao
 
+    def criar_atalhos(self, master, itens, largura=134, altura=68):
+        linha = tk.Frame(master, bg=COR_FUNDO_2)
+        for idx, (rotulo, comando) in enumerate(itens):
+            botao = SmallButton(linha, rotulo, comando, largura=largura, altura=altura)
+            botao.grid(row=0, column=idx, padx=(0 if idx == 0 else 8, 0), sticky="w")
+        return linha
+
     def criar_pagina_inicio(self):
         pagina = self.nova_pagina("inicio")
         resumo = tk.Frame(pagina, bg=COR_FUNDO_2)
         resumo.pack(fill="x", pady=(2, 14))
-        self.card_prontos = MetricCard(resumo, "Prontos para envio", "0", COR_VERDE)
-        self.card_prontos.grid(row=0, column=0, padx=(0, 8), sticky="ew")
-        self.card_sem_retorno = MetricCard(resumo, "Sem retorno", "0", COR_LARANJA)
-        self.card_sem_retorno.grid(row=0, column=1, padx=8, sticky="ew")
-        self.card_risco = MetricCard(resumo, "Em risco", "0", COR_VERMELHO)
-        self.card_risco.grid(row=0, column=2, padx=8, sticky="ew")
-        self.card_total = MetricCard(resumo, "Total de pendências", "0", COR_DOURADO)
-        self.card_total.grid(row=0, column=3, padx=(8, 0), sticky="ew")
-        for col in range(4):
+        self.card_vencendo_hoje = MetricCard(
+            resumo, "OSs vencendo hoje", "0", COR_LARANJA,
+            comando=lambda: self.abrir_pendencias_filtradas("vencendo_hoje"),
+        )
+        self.card_vencendo_hoje.grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        self.card_prestador_top = MetricCard(
+            resumo, "Maior volume hoje", "—", COR_AZUL, tamanho_valor=16,
+            comando=lambda: self.abrir_pendencias_filtradas("prestador_top", self.ultimo_prestador_top),
+        )
+        self.card_prestador_top.grid(row=0, column=1, padx=8, sticky="ew")
+        self.card_criticas = MetricCard(
+            resumo, "OSs críticas (5+ dias)", "0", COR_VERMELHO,
+            comando=lambda: self.abrir_pendencias_filtradas("criticas"),
+        )
+        self.card_criticas.grid(row=0, column=2, padx=(8, 0), sticky="ew")
+        for col in range(3):
             resumo.grid_columnconfigure(col, weight=1)
 
-        tk.Label(
+        self.criar_atalhos(
             pagina,
-            text="Ações rápidas",
-            bg=COR_FUNDO_2,
-            fg=COR_BRANCO,
-            font=("Arial", 14, "bold"),
-            anchor="w",
-        ).pack(fill="x", pady=(6, 8))
-        acoes = tk.Frame(pagina, bg=COR_FUNDO_2)
-        acoes.pack(fill="x")
-        cards = [
-            ("Gerar Pendências", "Atualiza planilha, imagens e acompanhamento.", self.gerar_pendencias, COR_AZUL, COR_AZUL_HOVER),
-            ("Gerar Roteirização", "Baixa Mobyan + OGEA e distribui por técnico.", self.gerar_roteirizacao, COR_DOURADO, COR_DOURADO_HOVER),
-            ("Gerar Roteiros PDF", "Cria um PDF unificado para cada técnico.", self.gerar_pdfs, COR_LARANJA, COR_LARANJA_HOVER),
-            ("Analisar Abonos", "Seleciona o relatório OGEA e analisa sábado.", self.analisar_abonos, COR_VERDE, COR_VERDE_HOVER),
-        ]
-        for idx, (titulo, desc, comando, cor, hover) in enumerate(cards):
-            card = self.registrar_action(ActionCard(acoes, titulo, desc, comando, cor, hover, largura=280))
-            card.grid(row=idx // 2, column=idx % 2, padx=(0 if idx % 2 == 0 else 8, 8 if idx % 2 == 0 else 0), pady=6, sticky="ew")
-        acoes.grid_columnconfigure(0, weight=1)
-        acoes.grid_columnconfigure(1, weight=1)
+            [
+                ("Abrir\nPendências", self.abrir_planilha),
+                ("Abrir\nRoteirização", self.abrir_roteirizacao),
+                ("Abrir\nRoteiros PDF", self.abrir_pasta_pdfs),
+                ("Abrir Gestão\nde Rotas", self.abrir_gestao_rotas),
+            ],
+        ).pack(anchor="w", pady=(2, 12))
+
+        self.adicionar_painel_info(
+            pagina,
+            "Como funciona esse painel",
+            "Os números acima vêm da última planilha de pendências gerada (\"Gerar Pendências\"), sempre desconsiderando envios de bobina, que não contam no SLA mensal: quantas OSs vencem hoje, qual prestador concentra o maior volume de vencimentos hoje e quantas OSs já estão críticas, com 5 dias de atraso ou mais. Gere as pendências de novo ou use \"Atualizar Resumos\" para recalcular.",
+            altura=110,
+        )
 
     def criar_pagina_operacao(self):
         pagina = self.nova_pagina("operacao")
@@ -610,32 +724,18 @@ class CentralVisconde:
             altura=125,
         ))
         b2.grid(row=0, column=1, padx=(8, 0), sticky="ew")
-        b3 = self.registrar_action(ActionCard(
-            acoes,
-            "Gerar OS Visconde - TESTE",
-            "Cria as OSs próprias da Visconde em uma pasta piloto. Não altera a roteirização nem os PDFs oficiais.",
-            self.gerar_os_visconde_teste,
-            COR_AZUL,
-            COR_AZUL_HOVER,
-            largura=390,
-            altura=125,
-        ))
-        b3.grid(row=1, column=0, columnspan=2, pady=(12, 0), sticky="ew")
         acoes.grid_columnconfigure(0, weight=1)
         acoes.grid_columnconfigure(1, weight=1)
 
-        util = tk.Frame(pagina, bg=COR_FUNDO_2)
-        util.pack(fill="x", pady=(4, 0))
-        botoes = [
-            ("Abrir Pendências", self.abrir_planilha),
-            ("Abrir Acompanhamento", self.abrir_acompanhamento),
-            ("Abrir Imagens", self.abrir_pasta_imagens),
-            ("Atualizar Resumo", self.atualizar_resumos),
-        ]
-        for idx, (texto, comando) in enumerate(botoes):
-            b = SmallButton(util, texto, comando, largura=190)
-            b.grid(row=0, column=idx, padx=(0 if idx == 0 else 6, 6 if idx < len(botoes) - 1 else 0), sticky="ew")
-            util.grid_columnconfigure(idx, weight=1)
+        self.criar_atalhos(
+            pagina,
+            [
+                ("Abrir\nPendências", self.abrir_planilha),
+                ("Abrir\nAcompanhamento", self.abrir_acompanhamento),
+                ("Abrir\nImagens", self.abrir_pasta_imagens),
+                ("Atualizar\nResumo", self.atualizar_resumos),
+            ],
+        ).pack(anchor="w", pady=(4, 0))
 
         self.adicionar_painel_info(
             pagina,
@@ -672,41 +772,24 @@ class CentralVisconde:
         acoes.grid_columnconfigure(0, weight=1)
         acoes.grid_columnconfigure(1, weight=1)
 
-        util = tk.Frame(pagina, bg=COR_FUNDO_2)
-        util.pack(fill="x")
-        b = SmallButton(util, "Abrir Roteirização", self.abrir_roteirizacao, 220)
-        b.grid(row=0, column=0, padx=(0, 6), sticky="ew")
-        b = SmallButton(util, "Abrir Roteiros PDF", self.abrir_pasta_pdfs, 220)
-        b.grid(row=0, column=1, padx=6, sticky="ew")
-        b = SmallButton(util, "Abrir OS Visconde TESTE", self.abrir_pasta_os_visconde_teste, 220)
-        b.grid(row=0, column=2, padx=(6, 0), sticky="ew")
-        util.grid_columnconfigure(0, weight=1)
-        util.grid_columnconfigure(1, weight=1)
-        util.grid_columnconfigure(2, weight=1)
-
-        self.adicionar_painel_info(
+        self.criar_atalhos(
             pagina,
-            "Resultado final",
-            "A pasta de PDFs oficiais continua com um arquivo por técnico. A OS Visconde TESTE é gerada separadamente em outputs/os_visconde_teste e não altera o fluxo oficial.",
-        )
+            [
+                ("Abrir\nRoteirização", self.abrir_roteirizacao),
+                ("Abrir\nRoteiros PDF", self.abrir_pasta_pdfs),
+                ("Abrir base\nde regras", self.abrir_base_rotas),
+            ],
+        ).pack(anchor="w", pady=(0, 18))
 
-    def criar_pagina_gestao_rotas(self):
-        pagina = self.nova_pagina("rotas")
-
-        metricas = tk.Frame(pagina, bg=COR_FUNDO_2)
-        metricas.pack(fill="x", pady=(2, 12))
-        self.card_rotas_sem_rota = MetricCard(metricas, "OSs sem rota", "0", COR_VERMELHO)
-        self.card_rotas_sem_rota.grid(row=0, column=0, padx=(0, 6), sticky="ew")
-        self.card_rotas_conflitos = MetricCard(metricas, "OSs em conflito", "0", COR_LARANJA)
-        self.card_rotas_conflitos.grid(row=0, column=1, padx=6, sticky="ew")
-        self.card_rotas_regras = MetricCard(metricas, "Regras ativas", "0", COR_DOURADO)
-        self.card_rotas_regras.grid(row=0, column=2, padx=6, sticky="ew")
-        self.card_rotas_aliases = MetricCard(metricas, "Aliases ativos", "0", COR_AZUL)
-        self.card_rotas_aliases.grid(row=0, column=3, padx=(6, 0), sticky="ew")
-        for col in range(4):
-            metricas.grid_columnconfigure(col, weight=1)
-
-        b = ActionCard(
+        tk.Label(
+            pagina,
+            text="Gestão de Rotas",
+            bg=COR_FUNDO_2,
+            fg=COR_BRANCO,
+            font=("Arial", 13, "bold"),
+            anchor="w",
+        ).pack(fill="x", pady=(0, 8))
+        ActionCard(
             pagina,
             "Abrir Gestão Inteligente de Rotas",
             "Resolva bairros sem rota, crie aliases, edite regras e consulte o histórico sem abrir o Excel.",
@@ -714,118 +797,68 @@ class CentralVisconde:
             COR_DOURADO,
             COR_DOURADO_HOVER,
             largura=790,
-            altura=132,
-        )
-        b.pack(fill="x", pady=(2, 12))
+            altura=100,
+        ).pack(fill="x")
 
-        util = tk.Frame(pagina, bg=COR_FUNDO_2)
-        util.pack(fill="x")
-        SmallButton(util, "Gerar Roteirização", self.gerar_roteirizacao, 220).grid(row=0, column=0, padx=(0, 6), sticky="ew")
-        SmallButton(util, "Abrir base de regras", self.abrir_base_rotas, 220).grid(row=0, column=1, padx=6, sticky="ew")
-        SmallButton(util, "Atualizar indicadores", self.atualizar_resumo_rotas, 220).grid(row=0, column=2, padx=(6, 0), sticky="ew")
-        for col in range(3):
-            util.grid_columnconfigure(col, weight=1)
+    def criar_pagina_ferramentas(self):
+        pagina = self.nova_pagina("ferramentas")
 
-        self.adicionar_painel_info(
-            pagina,
-            "Central como tela de operação",
-            "A planilha de regras continua existindo apenas como base interna. Pela Gestão de Rotas você pode resolver casos repetidos de uma só vez, confirmar sugestões de aliases, cadastrar bairros, editar regras, ativar/desativar rotas e acompanhar backups e histórico.",
-            altura=130,
-        )
-
-    def criar_pagina_os_teste(self):
-        pagina = self.nova_pagina("os_teste")
-        topo = tk.Frame(pagina, bg=COR_FUNDO_2)
-        topo.pack(fill="x", pady=(2, 14))
-        botao = self.registrar_action(ActionCard(
-            topo,
-            "Gerar OS Visconde - TESTE",
-            "Cria as OSs próprias da Visconde usando os relatórios atuais, sem alterar a roteirização nem os PDFs oficiais.",
-            self.gerar_os_visconde_teste,
-            COR_AZUL,
-            COR_AZUL_HOVER,
-            largura=560,
-            altura=132,
-        ))
-        botao.pack(fill="x")
-
-        util = tk.Frame(pagina, bg=COR_FUNDO_2)
-        util.pack(fill="x")
-        SmallButton(util, "Abrir OSs de teste", self.abrir_pasta_os_visconde_teste, 260).grid(row=0, column=0, padx=(0, 6), sticky="ew")
-        SmallButton(util, "Abrir Roteirização oficial", self.abrir_roteirizacao, 260).grid(row=0, column=1, padx=(6, 0), sticky="ew")
-        util.grid_columnconfigure(0, weight=1)
-        util.grid_columnconfigure(1, weight=1)
-
-        self.adicionar_painel_info(
-            pagina,
-            "Modo piloto isolado",
-            "Este botão lê os relatórios já baixados e a roteirização atual. As novas OSs ficam em outputs/os_visconde_teste, sem modificar o fluxo oficial, a roteirização ou os roteiros já validados.",
-            altura=140,
-        )
-
-    def criar_pagina_abonos(self):
-        pagina = self.nova_pagina("abonos")
-        topo = tk.Frame(pagina, bg=COR_FUNDO_2)
-        topo.pack(fill="x", pady=(2, 12))
         b = self.registrar_action(ActionCard(
-            topo,
+            pagina,
             "Selecionar relatório e analisar",
             "Filtra a Data Limite de hoje e procura em todos os campos indícios de abertura aos sábados.",
             self.analisar_abonos,
             COR_VERDE,
             COR_VERDE_HOVER,
-            largura=520,
-            altura=130,
+            largura=790,
+            altura=92,
         ))
         b.pack(fill="x")
 
-        metricas = tk.Frame(pagina, bg=COR_FUNDO_2)
-        metricas.pack(fill="x", pady=(4, 12))
-        self.card_abonar = MetricCard(metricas, "Abonar", "0", COR_VERMELHO)
-        self.card_abonar.grid(row=0, column=0, padx=(0, 6), sticky="ew")
-        self.card_nao_abonar = MetricCard(metricas, "Não abonar", "0", COR_VERDE)
-        self.card_nao_abonar.grid(row=0, column=1, padx=6, sticky="ew")
-        self.card_revisar = MetricCard(metricas, "Revisar manualmente", "0", COR_LARANJA)
-        self.card_revisar.grid(row=0, column=2, padx=6, sticky="ew")
-        self.card_total_abonos = MetricCard(metricas, "Total analisado", "0", COR_DOURADO)
-        self.card_total_abonos.grid(row=0, column=3, padx=(6, 0), sticky="ew")
-        for col in range(4):
-            metricas.grid_columnconfigure(col, weight=1)
-
-        util = tk.Frame(pagina, bg=COR_FUNDO_2)
-        util.pack(fill="x")
-        SmallButton(util, "Abrir última análise", self.abrir_analise_abonos, 220).grid(row=0, column=0, padx=(0, 6), sticky="ew")
-        SmallButton(util, "Abrir pasta de abonos", self.abrir_pasta_abonos, 220).grid(row=0, column=1, padx=(6, 0), sticky="ew")
-        util.grid_columnconfigure(0, weight=1)
-        util.grid_columnconfigure(1, weight=1)
+        self.criar_atalhos(
+            pagina,
+            [
+                ("Abrir última\nanálise", self.abrir_analise_abonos),
+                ("Abrir pasta\nde abonos", self.abrir_pasta_abonos),
+            ],
+            altura=58,
+        ).pack(anchor="w", pady=(8, 0))
 
         self.adicionar_painel_info(
             pagina,
             "Como o analista decide",
-            "• Abre sábado de forma explícita: NÃO ABONAR.\n• Não abre sábado ou funciona apenas de segunda a sexta: ABONAR.\n• Nenhuma informação sobre sábado: ABONAR, seguindo a regra operacional informada.\n• Informações conflitantes: REVISAR MANUALMENTE.\n\nO texto é pesquisado em todos os campos, inclusive bairro, endereço, observação, cliente e serviço.",
-            altura=145,
+            "• Abre sábado de forma explícita: NÃO ABONAR.  • Não abre sábado ou funciona apenas de segunda a sexta: ABONAR.\n• Nenhuma informação sobre sábado: ABONAR, seguindo a regra operacional informada.  • Informações conflitantes: REVISAR MANUALMENTE.\nPesquisa todos os campos: bairro, endereço, observação, cliente e serviço.",
+            altura=112,
         )
 
-    def criar_pagina_sistema(self):
-        pagina = self.nova_pagina("sistema")
-        util = tk.Frame(pagina, bg=COR_FUNDO_2)
-        util.pack(fill="x", pady=(2, 12))
-        botoes = [
-            ("Abrir Projeto", self.abrir_pasta_projeto),
-            ("Abrir Logs", self.abrir_pasta_logs),
-            ("Abrir PDFs", self.abrir_pasta_pdfs),
-            ("Atualizar Resumos", self.atualizar_resumos),
-        ]
-        for idx, (texto, comando) in enumerate(botoes):
-            SmallButton(util, texto, comando, 190).grid(row=0, column=idx, padx=5, sticky="ew")
-            util.grid_columnconfigure(idx, weight=1)
+        tk.Frame(pagina, bg=COR_BORDA, height=1).pack(fill="x", pady=(12, 8))
 
-        self.adicionar_painel_info(
+        tk.Label(
             pagina,
-            "Estrutura da Central",
-            f"Pasta principal: {BASE_DIR}\n\nAs automações usam a mesma pasta de bases, saídas e logs. As versões de Windows e macOS mantêm a mesma lógica; somente os inicializadores e caminhos do sistema operacional são diferentes.",
-            altura=160,
-        )
+            text="Sistema",
+            bg=COR_FUNDO_2,
+            fg=COR_BRANCO,
+            font=("Arial", 13, "bold"),
+            anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+        tk.Label(
+            pagina,
+            text=f"Pasta principal: {BASE_DIR}",
+            bg=COR_FUNDO_2,
+            fg=COR_TEXTO_FRACO,
+            font=("Arial", 9),
+            anchor="w",
+        ).pack(fill="x", pady=(0, 6))
+        self.criar_atalhos(
+            pagina,
+            [
+                ("Abrir\nProjeto", self.abrir_pasta_projeto),
+                ("Abrir\nLogs", self.abrir_pasta_logs),
+                ("Abrir\nPDFs", self.abrir_pasta_pdfs),
+                ("Atualizar\nResumos", self.atualizar_resumos),
+            ],
+            altura=58,
+        ).pack(anchor="w")
 
     def adicionar_painel_info(self, master, titulo, texto, altura=110):
         painel = tk.Frame(
@@ -859,13 +892,10 @@ class CentralVisconde:
 
     def mostrar_pagina(self, chave):
         titulos = {
-            "inicio": ("Visão Geral", "Acesso rápido às rotinas principais da empresa."),
-            "operacao": ("Pendências e WhatsApp", "Geração, revisão e comunicação das pendências operacionais."),
-            "roteiros": ("Roteirização e PDFs", "Distribuição das OSs e impressão dos roteiros por técnico."),
-            "rotas": ("Gestão Inteligente de Rotas", "Bairros, aliases, conflitos e regras administrados diretamente pela Central."),
-            "os_teste": ("OS Visconde - Piloto", "Geração paralela das OSs próprias, sem interferir no processo oficial."),
-            "abonos": ("Analista de Abonos OGEA", "Análise conservadora das OSs com vencimento no sábado."),
-            "sistema": ("Arquivos e Sistema", "Acesso às pastas, logs e estrutura da Central Visconde."),
+            "inicio": ("Painel", "Panorama das OSs vencendo hoje, desconsiderando envios de bobina."),
+            "operacao": ("Operação", "Geração, revisão e comunicação das pendências operacionais."),
+            "roteiros": ("Roteiros", "Roteirização, ajuste de rotas e geração dos PDFs por técnico."),
+            "ferramentas": ("Abono OGEA", "Analista de abonos OGEA e acesso a arquivos e logs da Central."),
         }
         for nome, pagina in self.paginas.items():
             if nome == chave:
@@ -875,9 +905,9 @@ class CentralVisconde:
         titulo, subtitulo = titulos[chave]
         self.page_title.config(text=titulo)
         self.page_subtitle.config(text=subtitulo)
-        if chave == "abonos":
-            self.atualizar_resumo_abonos()
-        elif chave == "rotas":
+        if chave == "inicio":
+            self.atualizar_metricas_dia()
+        elif chave == "roteiros":
             self.atualizar_resumo_rotas()
 
     def escrever_log(self, texto):
@@ -966,24 +996,6 @@ class CentralVisconde:
             self.escrever_log(f"\nAviso: não consegui atualizar o resumo: {erro}\n")
             return vazio
 
-    def atualizar_resumo_abonos(self):
-        contagens = {"ABONAR": 0, "NÃO ABONAR": 0, "REVISAR MANUALMENTE": 0, "TOTAL": 0}
-        if ARQUIVO_ABONOS.exists():
-            try:
-                df = pd.read_excel(ARQUIVO_ABONOS, sheet_name="Todos", dtype=str, keep_default_na=False, na_filter=False, header=3)
-                if "Decisão" in df.columns:
-                    decisoes = df["Decisão"].astype(str).str.strip()
-                    contagens["ABONAR"] = int((decisoes == "ABONAR").sum())
-                    contagens["NÃO ABONAR"] = int((decisoes == "NÃO ABONAR").sum())
-                    contagens["REVISAR MANUALMENTE"] = int((decisoes == "REVISAR MANUALMENTE").sum())
-                    contagens["TOTAL"] = len(df)
-            except Exception as erro:
-                self.escrever_log(f"\nAviso: não consegui ler o último resumo de abonos: {erro}\n")
-        self.card_abonar.atualizar(contagens["ABONAR"], COR_VERMELHO)
-        self.card_nao_abonar.atualizar(contagens["NÃO ABONAR"], COR_VERDE)
-        self.card_revisar.atualizar(contagens["REVISAR MANUALMENTE"], COR_LARANJA)
-        self.card_total_abonos.atualizar(contagens["TOTAL"], COR_DOURADO)
-
     def atualizar_resumo_rotas(self):
         resumo = {"sem_rota": 0, "conflitos": 0, "regras": 0, "aliases": 0}
         if obter_resumo_rotas is not None:
@@ -999,20 +1011,76 @@ class CentralVisconde:
         return resumo
 
     def atualizar_resumos(self):
-        dados = self.ler_envios_para_resumo()
-        self.card_prontos.atualizar(dados["prontos"], COR_VERDE)
-        self.card_sem_retorno.atualizar(dados["sem_retorno"], COR_LARANJA)
-        self.card_risco.atualizar(dados["em_risco"], COR_VERMELHO)
-        self.card_total.atualizar(dados["total"], COR_DOURADO)
-        self.atualizar_resumo_abonos()
         self.atualizar_resumo_rotas()
+        self.atualizar_metricas_dia()
         self.definir_status("resumos atualizados", COR_TEXTO_SECUNDARIO)
+
+    def calcular_metricas_painel(self):
+        vazio = {
+            "existe": False,
+            "vencendo_hoje": 0,
+            "criticas": 0,
+            "prestador_top": None,
+            "prestador_top_qtd": 0,
+        }
+        if not ARQUIVO_PLANILHA.exists():
+            return vazio
+        try:
+            df = pd.read_excel(
+                ARQUIVO_PLANILHA, sheet_name="Pendências", dtype=str,
+                keep_default_na=False, na_filter=False,
+            )
+        except Exception as erro:
+            self.escrever_log(f"\nAviso: não consegui atualizar o painel do dia: {erro}\n")
+            return vazio
+        if "Serviço" in df.columns:
+            df = df[~df["Serviço"].astype(str).str.upper().str.contains("BOBINA", na=False)]
+        if "Data Limite" not in df.columns:
+            return {**vazio, "existe": True}
+
+        datas = pd.to_datetime(df["Data Limite"], format="%d/%m/%Y", errors="coerce").dt.date
+        hoje = date.today()
+        vencendo_hoje_mask = datas == hoje
+        criticas_mask = datas.apply(lambda d: d is not None and not pd.isna(d) and (hoje - d).days >= 5)
+
+        prestador_top = None
+        prestador_top_qtd = 0
+        if "Prestador" in df.columns:
+            prestadores = df.loc[vencendo_hoje_mask, "Prestador"].astype(str).str.strip()
+            prestadores = prestadores[prestadores != ""]
+            if not prestadores.empty:
+                contagem = prestadores.value_counts()
+                prestador_top = contagem.idxmax()
+                prestador_top_qtd = int(contagem.max())
+
+        return {
+            "existe": True,
+            "vencendo_hoje": int(vencendo_hoje_mask.sum()),
+            "criticas": int(criticas_mask.sum()),
+            "prestador_top": prestador_top,
+            "prestador_top_qtd": prestador_top_qtd,
+        }
+
+    def atualizar_metricas_dia(self):
+        if not hasattr(self, "card_vencendo_hoje"):
+            return
+        dados = self.calcular_metricas_painel()
+        self.ultimo_prestador_top = dados["prestador_top"]
+        self.card_vencendo_hoje.atualizar(dados["vencendo_hoje"], COR_LARANJA)
+        self.card_criticas.atualizar(dados["criticas"], COR_VERMELHO)
+        if dados["prestador_top"]:
+            self.card_prestador_top.atualizar(
+                dados["prestador_top"], COR_AZUL,
+                subtitulo=f"{dados['prestador_top_qtd']} OS(s) vencendo hoje",
+            )
+        else:
+            self.card_prestador_top.atualizar("—", COR_AZUL, subtitulo="")
 
     def rodar_script(self, script_path, nome_acao, mensagem_sucesso, env_extra=None, argumentos=None):
         if self.processo_rodando:
             messagebox.showwarning("Processo em andamento", "Já existe uma automação rodando. Aguarde finalizar.")
             return
-        if not script_path.exists():
+        if not FROZEN and not script_path.exists():
             messagebox.showerror("Arquivo não encontrado", f"Não encontrei o script:\n{script_path}")
             return
         self.acao_atual = nome_acao
@@ -1038,7 +1106,12 @@ class CentralVisconde:
             kwargs_processo = {}
             if os.name == "nt":
                 kwargs_processo["creationflags"] = subprocess.CREATE_NO_WINDOW
-            comando = [str(PYTHON_AUTOMACOES), str(script_path)] + list(argumentos or [])
+            if FROZEN:
+                comando = [
+                    str(PYTHON_AUTOMACOES), "--rodar-automacao", script_path.stem,
+                ] + list(argumentos or [])
+            else:
+                comando = [str(PYTHON_AUTOMACOES), str(script_path)] + list(argumentos or [])
             processo = subprocess.Popen(
                 comando,
                 cwd=str(BASE_DIR),
@@ -1125,7 +1198,7 @@ class CentralVisconde:
         if total <= 0:
             return False
 
-        self.mostrar_pagina("rotas")
+        self.mostrar_pagina("roteiros")
         self.definir_status(f"{total} OS(s) aguardando ajuste de rota", COR_LARANJA)
         self.escrever_log(
             f"\nATENÇÃO: a roteirização possui {sem_rota} OS(s) sem rota e "
@@ -1158,7 +1231,7 @@ class CentralVisconde:
             "Depois de gerar novamente o roteiro sem pendências, tente esta etapa outra vez.",
             parent=self.root,
         )
-        self.mostrar_pagina("rotas")
+        self.mostrar_pagina("roteiros")
         self.abrir_gestao_rotas()
         return False
 
@@ -1324,6 +1397,85 @@ class CentralVisconde:
         else:
             messagebox.showwarning("Planilha não encontrada", "A planilha ainda não foi criada.")
 
+    def montar_filtro_pendencias(self, modo, prestador=None):
+        if modo == "prestador_top" and not prestador:
+            return None, "Nenhum prestador com OS vencendo hoje ainda."
+        if not ARQUIVO_PLANILHA.exists():
+            return None, "A planilha de pendências ainda não foi gerada."
+        try:
+            df = pd.read_excel(
+                ARQUIVO_PLANILHA, sheet_name="Pendências", dtype=str,
+                keep_default_na=False, na_filter=False,
+            )
+        except Exception as erro:
+            return None, f"Não consegui ler a planilha de pendências:\n{erro}"
+        if "Serviço" in df.columns:
+            df = df[~df["Serviço"].astype(str).str.upper().str.contains("BOBINA", na=False)]
+        if "Data Limite" not in df.columns:
+            return None, "A coluna 'Data Limite' não foi encontrada na planilha."
+
+        datas = pd.to_datetime(df["Data Limite"], format="%d/%m/%Y", errors="coerce").dt.date
+        hoje = date.today()
+
+        if modo == "vencendo_hoje":
+            filtro = datas == hoje
+            titulo = "OSs vencendo hoje"
+            nome_arquivo = "vencendo_hoje.xlsx"
+        elif modo == "criticas":
+            filtro = datas.apply(lambda d: d is not None and not pd.isna(d) and (hoje - d).days >= 5)
+            titulo = "OSs críticas (5+ dias de atraso)"
+            nome_arquivo = "criticas.xlsx"
+        elif modo == "prestador_top":
+            filtro = (datas == hoje) & (df["Prestador"].astype(str).str.strip() == str(prestador).strip())
+            titulo = f"Vencendo hoje — {prestador}"
+            nome_arquivo = "prestador_top.xlsx"
+        else:
+            return None, "Filtro desconhecido."
+
+        resultado = df[filtro].reset_index(drop=True)
+        if resultado.empty:
+            return None, "Nenhuma OS encontrada para esse filtro."
+
+        PASTA_FILTROS_PAINEL.mkdir(parents=True, exist_ok=True)
+        caminho = PASTA_FILTROS_PAINEL / nome_arquivo
+        with pd.ExcelWriter(caminho, engine="openpyxl") as writer:
+            resultado.to_excel(writer, index=False, sheet_name="Filtro")
+
+        wb = openpyxl.load_workbook(caminho)
+        ws = wb["Filtro"]
+        total_colunas = len(resultado.columns)
+        ws.insert_rows(1)
+        ws.cell(row=1, column=1, value=(
+            f"{titulo} — {len(resultado)} OS(s) — gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        ))
+        ws.cell(row=1, column=1).font = Font(bold=True, color="F4C430", size=12)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_colunas)
+        linha_cabecalho = 2
+        for coluna in range(1, total_colunas + 1):
+            celula = ws.cell(row=linha_cabecalho, column=coluna)
+            celula.font = Font(bold=True, color="FFFFFF")
+            celula.fill = PatternFill("solid", fgColor="171717")
+        ws.freeze_panes = ws.cell(row=linha_cabecalho + 1, column=1)
+        ws.auto_filter.ref = (
+            f"A{linha_cabecalho}:{get_column_letter(total_colunas)}{linha_cabecalho + len(resultado)}"
+        )
+        for coluna in range(1, total_colunas + 1):
+            letra = get_column_letter(coluna)
+            maior = max(
+                [len(str(resultado.columns[coluna - 1]))]
+                + [len(str(v)) for v in resultado.iloc[:, coluna - 1]]
+            )
+            ws.column_dimensions[letra].width = min(max(maior + 2, 10), 45)
+        wb.save(caminho)
+        return caminho, None
+
+    def abrir_pendencias_filtradas(self, modo, prestador=None):
+        caminho, erro = self.montar_filtro_pendencias(modo, prestador=prestador)
+        if erro:
+            messagebox.showinfo("Filtro de pendências", erro)
+            return
+        abrir_caminho(caminho)
+
     def abrir_roteirizacao(self):
         if ARQUIVO_ROTEIRIZACAO.exists():
             abrir_caminho(ARQUIVO_ROTEIRIZACAO)
@@ -1362,11 +1514,199 @@ class CentralVisconde:
     def abrir_pasta_projeto(self):
         abrir_caminho(BASE_DIR)
 
+    def sair_da_conta(self):
+        if self.processo_rodando:
+            messagebox.showwarning(
+                "Sair da conta",
+                "Espere a automação em andamento terminar antes de sair da conta.",
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Sair da conta",
+            "Isso encerra a sessão atual. Vai ser preciso fazer login de novo "
+            "(pode ser em outra conta) pra continuar usando a Central. Deseja sair?",
+        ):
+            return
+
+        limpar_sessao_local()
+        self.root.destroy()
+        main()
+
+
+def despachar_automacao_frozen():
+    """Num executável empacotado, sys.executable é o próprio app — não dá pra
+    apontar um caminho de .py como fariam os scripts hoje via subprocess. Em vez
+    disso, rodar_script/gestao_rotas relançam o próprio executável com
+    "--rodar-automacao <modulo> ...args", e este ponto de entrada intercepta isso
+    antes de abrir qualquer janela, despachando pro módulo certo via runpy —
+    cada script mantém seu próprio bloco `if __name__ == "__main__":` inalterado.
+
+    Retorna True se tratou uma chamada de despacho (o processo deve encerrar
+    logo em seguida), False se é uma abertura normal da GUI."""
+    if not FROZEN or len(sys.argv) < 3 or sys.argv[1] != "--rodar-automacao":
+        return False
+
+    import runpy
+
+    nome_modulo = sys.argv[2]
+    sys.argv = [nome_modulo] + sys.argv[3:]
+    runpy.run_module(nome_modulo, run_name="__main__")
+    return True
+
+
+def chromium_instalado():
+    """Confere se o Chromium do Playwright já está baixado. Num executável
+    empacotado não existe mais um `playwright install chromium` rodado pelo
+    instalador (esse passo some junto com a venv/pip) — então isso precisa ser
+    verificado e resolvido na primeira abertura do app."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as playwright:
+            return Path(playwright.chromium.executable_path).exists()
+    except Exception:
+        return False
+
+
+def instalar_chromium_com_progresso(root, ao_concluir):
+    """Baixa o Chromium do Playwright em segundo plano, mostrando um diálogo
+    simples de progresso. Chama ao_concluir(erro) na thread principal do Tk
+    quando terminar (erro=None em caso de sucesso)."""
+    janela = tk.Toplevel(root)
+    janela.title("Central Visconde")
+    janela.configure(bg=COR_FUNDO)
+    janela.geometry("440x150")
+    janela.resizable(False, False)
+    janela.protocol("WM_DELETE_WINDOW", lambda: None)
+    janela.transient(root)
+    janela.grab_set()
+
+    tk.Label(
+        janela,
+        text="Preparando o navegador da automação (só na primeira vez)...",
+        bg=COR_FUNDO,
+        fg=COR_BRANCO,
+        font=("Arial", 11),
+        wraplength=400,
+        justify="left",
+    ).pack(pady=(26, 10), padx=20)
+
+    barra = ttk.Progressbar(janela, mode="indeterminate")
+    barra.pack(fill="x", padx=20, pady=8)
+    barra.start(12)
+
+    def worker():
+        erro = None
+        try:
+            from playwright._impl._driver import compute_driver_executable, get_driver_env
+            driver_executable, driver_cli = compute_driver_executable()
+            resultado = subprocess.run(
+                [str(driver_executable), driver_cli, "install", "chromium"],
+                env=get_driver_env(),
+            )
+            if resultado.returncode != 0:
+                erro = "A instalação do navegador terminou com código de erro."
+        except Exception as exc:
+            erro = str(exc)
+
+        def finalizar():
+            janela.destroy()
+            ao_concluir(erro)
+
+        root.after(0, finalizar)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def avisar_atualizacao_disponivel(root, info):
+    """Pergunta se o usuário quer baixar a atualização já publicada e, se sim,
+    baixa em segundo plano e pede pra fechar o app e rodar o instalador —
+    não se autossubstitui em silêncio (ver Fase 4 do plano)."""
+    versao_nova = info.get("versao", "?")
+    mensagem = f"Uma nova versão da Central Visconde está disponível ({versao_nova})."
+    if info.get("notas"):
+        mensagem += f"\n\n{info['notas']}"
+    mensagem += "\n\nDeseja baixar agora?"
+
+    if not messagebox.askyesno("Atualização disponível", mensagem):
+        return
+
+    nome_arquivo = Path(info["url_download"]).name or f"central-visconde-{versao_nova}"
+    destino = Path(tempfile.gettempdir()) / nome_arquivo
+
+    def finalizar(erro):
+        if erro:
+            messagebox.showerror("Central Visconde", f"Não consegui baixar a atualização:\n{erro}")
+            return
+        messagebox.showinfo(
+            "Atualização baixada",
+            f"A atualização foi baixada em:\n{destino}\n\n"
+            "Feche a Central Visconde e rode o instalador baixado pra concluir.",
+        )
+        try:
+            abrir_caminho(destino.parent)
+        except Exception:
+            pass
+
+    def worker():
+        erro = None
+        try:
+            baixar_atualizacao(info["url_download"], destino)
+        except Exception as exc:
+            erro = str(exc)
+        root.after(0, lambda: finalizar(erro))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def verificar_atualizacao_em_segundo_plano(root):
+    """Consulta o backend por versão nova sem travar a abertura do app (só faz
+    sentido em builds empacotados — rodando do código-fonte já é sempre a
+    versão mais recente)."""
+    def worker():
+        try:
+            info = verificar_atualizacao()
+        except Exception:
+            info = None
+        if info:
+            root.after(0, lambda: avisar_atualizacao_disponivel(root, info))
+
+    threading.Thread(target=worker, daemon=True).start()
+
 
 def main():
+    if despachar_automacao_frozen():
+        return
+
     configurar_identidade_windows()
+
+    if not garantir_sessao_valida():
+        return
+
     root = tk.Tk()
-    CentralVisconde(root)
+
+    def abrir_app_principal():
+        CentralVisconde(root)
+        if FROZEN:
+            root.after(2000, verificar_atualizacao_em_segundo_plano, root)
+
+    if FROZEN and not chromium_instalado():
+        root.withdraw()
+
+        def ao_concluir(erro):
+            root.deiconify()
+            if erro:
+                messagebox.showerror(
+                    "Central Visconde",
+                    f"Não consegui preparar o navegador da automação:\n{erro}\n\n"
+                    "Feche e abra o app de novo para tentar mais uma vez.",
+                )
+            abrir_app_principal()
+
+        instalar_chromium_com_progresso(root, ao_concluir)
+    else:
+        abrir_app_principal()
+
     root.mainloop()
 
 

@@ -22,13 +22,14 @@ try:
 except Exception as exc:
     raise SystemExit("A dependência pypdf não está instalada. Execute novamente o instalador principal.\n" + str(exc))
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR, RECURSOS_DIR
+
 DOWNLOADS = BASE_DIR / "downloads" / "roteirizacao"
 ROTEIRIZACAO = BASE_DIR / "outputs" / "roteirizacao" / "roteirizacao_atual.xlsx"
 OUT = BASE_DIR / "outputs" / "os_visconde_teste"
 IND = OUT / "individuais"
 POR_TEC = OUT / "por_tecnico"
-LOGO = BASE_DIR / "assets" / "logo_visconde_os_mono.png"
+LOGO = RECURSOS_DIR / "assets" / "logo_visconde_os_mono.png"
 
 W,H=A4; M=24; CW=W-2*M
 INK=HexColor('#222222'); LINE=HexColor('#666666'); PALE=HexColor('#F2F2F2'); PALE2=HexColor('#FAFAFA'); GOLD=HexColor('#C79B12')

@@ -18,11 +18,12 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR, FROZEN, RECURSOS_DIR
+
 ARQUIVO_REGRAS = BASE_DIR / "bases" / "regras_roteirizacao.xlsx"
 ARQUIVO_ROTEIRIZACAO = BASE_DIR / "outputs" / "roteirizacao" / "roteirizacao_atual.xlsx"
 ARQUIVO_TEMPORARIO = BASE_DIR / "outputs" / "roteirizacao" / "resolucoes_temporarias.json"
-SCRIPT_ROTEIRIZACAO = BASE_DIR / "app" / "gerar_roteirizacao.py"
+SCRIPT_ROTEIRIZACAO = RECURSOS_DIR / "app" / "gerar_roteirizacao.py"
 PASTA_BACKUPS = BASE_DIR / "bases" / "backups_roteirizacao"
 
 COR_FUNDO = "#080808"
@@ -1010,7 +1011,13 @@ class GestaoRotasWindow:
                 pass
 
         def executar():
-            comando = [str(obter_python_console()), str(SCRIPT_ROTEIRIZACAO), "--reprocessar-atual", "--sem-abrir"]
+            if FROZEN:
+                comando = [
+                    str(obter_python_console()), "--rodar-automacao", SCRIPT_ROTEIRIZACAO.stem,
+                    "--reprocessar-atual", "--sem-abrir",
+                ]
+            else:
+                comando = [str(obter_python_console()), str(SCRIPT_ROTEIRIZACAO), "--reprocessar-atual", "--sem-abrir"]
             if usar_temporarias:
                 comando.append("--usar-resolucoes-temporarias")
             kwargs = {}

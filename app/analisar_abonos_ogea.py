@@ -17,7 +17,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR
 PASTA_SAIDA = BASE_DIR / "outputs" / "abonos_ogea"
 PASTA_HISTORICO = PASTA_SAIDA / "historico"
 PASTA_LOGS = BASE_DIR / "logs" / "abonos_ogea"
@@ -734,11 +734,15 @@ def montar_painel_operacional(resultado):
     return painel[COLUNAS_PAINEL]
 
 
-def adicionar_aba_painel(wb, resultado):
-    ws = wb.create_sheet("Painel")
+def montar_aba_painel(ws, resultado, caminho_entrada, hoje, avisos, col_data, col_os):
+    """Constrói a aba única e resumida: cartões, legenda, dados da execução
+
+    e a lista de OSs, uma linha por OS. Substitui as antigas abas separadas
+    "Resumo" e "Painel", que mostravam basicamente a mesma coisa.
+    """
     estilizar_titulo(
         ws,
-        "Central Visconde | Painel Operacional",
+        "Central Visconde | Analista de Abonos OGEA",
         "Visão rápida para o dia a dia: o que ABONAR, o que ATENDER e o que REVISAR manualmente.",
     )
 
@@ -773,7 +777,32 @@ def adicionar_aba_painel(wb, resultado):
     ws["B8"] = "ABONAR = sugerir abono | ATENDER = cliente pode ser atendido sábado | REVISAR = conferir manualmente"
     ws["B8"].alignment = Alignment(wrap_text=True)
 
-    linha_cabecalho = 10
+    dia_semana = [
+        "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+        "sexta-feira", "sábado", "domingo",
+    ][hoje.weekday()]
+    ws["A9"] = "Análise"
+    ws["A9"].font = Font(color=COR_DOURADO, bold=True)
+    ws["B9"] = (
+        f"Analisado em {hoje.strftime('%d/%m/%Y')} ({dia_semana}) • "
+        f"Arquivo: {Path(caminho_entrada).name} • "
+        f"Coluna de data: {col_data or 'não identificada'} • "
+        f"Coluna de OS: {col_os or 'não identificada'}"
+    )
+    ws["B9"].alignment = Alignment(wrap_text=True, vertical="center")
+
+    ws["A10"] = "Avisos"
+    ws["A10"].font = Font(color=COR_DOURADO, bold=True)
+    if avisos:
+        ws["B10"] = " • ".join(avisos)
+        ws["B10"].fill = PatternFill("solid", fgColor=COR_AMARELO)
+    else:
+        ws["B10"] = "Nenhum aviso técnico nesta execução."
+    ws["B10"].alignment = Alignment(wrap_text=True, vertical="center")
+    ws.row_dimensions[9].height = 18
+    ws.row_dimensions[10].height = 18 if not avisos else 30
+
+    linha_cabecalho = 12
     for coluna_idx, coluna in enumerate(COLUNAS_PAINEL, start=1):
         ws.cell(linha_cabecalho, coluna_idx, coluna)
 
@@ -850,118 +879,18 @@ def adicionar_aba_painel(wb, resultado):
     return ws
 
 
-
 def criar_planilha(resultado, caminho_entrada, hoje, avisos, col_data, col_os):
     wb = Workbook()
     ws = wb.active
-    ws.title = "Resumo"
+    ws.title = "Painel"
     ws.sheet_view.showGridLines = False
-
-    total = len(resultado)
-    qtd_abonar = int((resultado["Decisão"] == "ABONAR").sum()) if total else 0
-    qtd_nao = int((resultado["Decisão"] == "NÃO ABONAR").sum()) if total else 0
-    qtd_revisar = int((resultado["Decisão"] == "REVISAR MANUALMENTE").sum()) if total else 0
-
-    ws.merge_cells("A1:H2")
-    ws["A1"] = "CENTRAL VISCONDE | ANALISTA DE ABONOS OGEA"
-    ws["A1"].fill = PatternFill("solid", fgColor=COR_PRETO)
-    ws["A1"].font = Font(color=COR_DOURADO, size=22, bold=True)
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 32
-    ws.row_dimensions[2].height = 20
-
-    dados = [
-        ("Data analisada", hoje.strftime("%d/%m/%Y")),
-        ("Dia da semana", ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"][hoje.weekday()]),
-        ("Arquivo de origem", str(Path(caminho_entrada).name)),
-        ("Coluna de data identificada", col_data or "Não identificada"),
-        ("Coluna de OS identificada", col_os or "Não identificada"),
-        ("Total analisado", total),
-    ]
-
-    ws["A4"] = "Informações da análise"
-    ws["A4"].font = Font(bold=True, color=COR_DOURADO, size=13)
-    for idx, (rotulo, valor) in enumerate(dados, start=5):
-        ws[f"A{idx}"] = rotulo
-        ws[f"A{idx}"].font = Font(bold=True, color=COR_BRANCO)
-        ws[f"A{idx}"].fill = PatternFill("solid", fgColor=COR_PRETO_2)
-        ws[f"B{idx}"] = valor
-        ws[f"B{idx}"].fill = PatternFill("solid", fgColor="F3F3F3")
-
-    cards = [
-        ("D4", "ABONAR", qtd_abonar, COR_VERMELHO, COR_VERMELHO_TEXTO),
-        ("F4", "NÃO ABONAR", qtd_nao, COR_VERDE, COR_VERDE_TEXTO),
-        ("D8", "REVISAR", qtd_revisar, COR_AMARELO, COR_AMARELO_TEXTO),
-        ("F8", "TOTAL", total, COR_AZUL_CLARO, "1F4E78"),
-    ]
-    for celula, titulo, valor, cor_fill, cor_font in cards:
-        coluna = ws[celula].column
-        linha = ws[celula].row
-        ws.merge_cells(start_row=linha, start_column=coluna, end_row=linha, end_column=coluna + 1)
-        ws.cell(linha, coluna, titulo)
-        ws.cell(linha, coluna).fill = PatternFill("solid", fgColor=COR_PRETO)
-        ws.cell(linha, coluna).font = Font(color=COR_DOURADO, bold=True)
-        ws.cell(linha, coluna).alignment = Alignment(horizontal="center")
-        ws.merge_cells(start_row=linha + 1, start_column=coluna, end_row=linha + 2, end_column=coluna + 1)
-        ws.cell(linha + 1, coluna, valor)
-        ws.cell(linha + 1, coluna).fill = PatternFill("solid", fgColor=cor_fill)
-        ws.cell(linha + 1, coluna).font = Font(color=cor_font, bold=True, size=24)
-        ws.cell(linha + 1, coluna).alignment = Alignment(horizontal="center", vertical="center")
-
-    ws["A13"] = "Regra operacional aplicada"
-    ws["A13"].font = Font(bold=True, color=COR_DOURADO, size=13)
-    ws.merge_cells("A14:H16")
-    ws["A14"] = (
-        "A análise procura informações em TODOS os campos da OS, inclusive bairro, endereço, observação, cliente e serviço. "
-        "Quando existe indicação clara de abertura aos sábados, classifica como NÃO ABONAR. Quando existe indicação de fechamento, "
-        "classifica como ABONAR. Quando não existe nenhuma informação sobre sábado, aplica a regra informada pela operação: considerar que não abre sábado e classificar como ABONAR."
-    )
-    ws["A14"].alignment = Alignment(wrap_text=True, vertical="top")
-    ws["A14"].fill = PatternFill("solid", fgColor="FFF8DC")
-    ws["A14"].border = Border(left=Side(style="medium", color=COR_DOURADO), right=Side(style="medium", color=COR_DOURADO))
-
-    linha_aviso = 18
-    ws[f"A{linha_aviso}"] = "Avisos"
-    ws[f"A{linha_aviso}"].font = Font(bold=True, color=COR_DOURADO, size=13)
-    if not avisos:
-        avisos = ["Nenhum aviso técnico nesta execução."]
-    for aviso in avisos:
-        linha_aviso += 1
-        ws.merge_cells(start_row=linha_aviso, start_column=1, end_row=linha_aviso, end_column=8)
-        ws.cell(linha_aviso, 1, f"• {aviso}")
-        ws.cell(linha_aviso, 1).alignment = Alignment(wrap_text=True)
-        ws.cell(linha_aviso, 1).fill = PatternFill("solid", fgColor=COR_AMARELO)
-
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 42
-    for col in ["C", "D", "E", "F", "G", "H"]:
-        ws.column_dimensions[col].width = 18
-
-    adicionar_aba_painel(wb, resultado)
+    montar_aba_painel(ws, resultado, caminho_entrada, hoje, avisos, col_data, col_os)
 
     adicionar_aba_dados(
         wb,
-        "Abonar",
-        resultado[resultado["Decisão"] == "ABONAR"],
-        "OSs com indicação de fechamento aos sábados ou sem qualquer evidência de abertura.",
-    )
-    adicionar_aba_dados(
-        wb,
-        "Não Abonar",
-        resultado[resultado["Decisão"] == "NÃO ABONAR"],
-        "OSs com indicação explícita de atendimento ou funcionamento aos sábados.",
-    )
-    adicionar_aba_dados(
-        wb,
-        "Revisar",
-        resultado[resultado["Decisão"] == "REVISAR MANUALMENTE"],
-        "OSs com informações conflitantes que exigem conferência manual.",
-    )
-    adicionar_aba_dados(
-        wb,
-        "Todos",
+        "Detalhes",
         resultado,
-        "Base completa da análise. Use Validação Manual e Observação Manual durante a conferência.",
+        "Base completa da análise. Use o filtro na coluna Decisão para ver só ABONAR, NÃO ABONAR ou REVISAR MANUALMENTE. Use Validação Manual e Observação Manual durante a conferência.",
     )
 
     regras_ws = wb.create_sheet("Regras")

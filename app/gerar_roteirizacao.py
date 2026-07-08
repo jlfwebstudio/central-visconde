@@ -18,7 +18,7 @@ from openpyxl.utils import get_column_letter
 from baixar_relatorios_roteirizacao import baixar_relatorios_automaticamente
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from caminho_base import BASE_DIR
 ARQUIVO_REGRAS = BASE_DIR / "bases" / "regras_roteirizacao.xlsx"
 PASTA_SAIDA = BASE_DIR / "outputs" / "roteirizacao"
 PASTA_HISTORICO = PASTA_SAIDA / "historico"
@@ -37,6 +37,9 @@ COR_AMARELO = "FFF2CC"
 COR_VERMELHO = "F4CCCC"
 COR_CINZA = "D9E2F3"
 COR_BORDA = "D9E2F3"
+COR_AJUSTE_MANUAL = "F4B183"
+
+NOME_TECNICO_AJUSTE_MANUAL = "AJUSTE MANUAL"
 
 TECNICOS_PADRAO = [
     "Adriano", "Emerson", "Fabio", "Fernando", "Gerson", "Geziel",
@@ -130,6 +133,11 @@ def preparar_mobyan(caminho):
         "Status": df["Status"].fillna("").astype(str).str.strip(),
         "Data Limite": df["Data Limite"].fillna("").astype(str).str.strip(),
         "Endereço": df["Endereço"].fillna("").astype(str).str.strip(),
+        "Contratante": (
+            df["Contratante"].fillna("").astype(str).str.strip()
+            if "Contratante" in df.columns
+            else ""
+        ),
     })
 
     resultado = resultado[resultado["Status"].map(status_aceito)].copy()
@@ -156,6 +164,11 @@ def preparar_ogea(caminho):
         "Status": df["Status"].fillna("").astype(str).str.strip(),
         "Data Limite": df["Data Limite"].fillna("").astype(str).str.strip(),
         "Endereço": df["Endereço"].fillna("").astype(str).str.strip(),
+        "Contratante": (
+            df["Contratante"].fillna("").astype(str).str.strip()
+            if "Contratante" in df.columns
+            else ""
+        ),
     })
 
     resultado = resultado[resultado["Status"].map(status_aceito)].copy()
@@ -394,6 +407,7 @@ def executar_motor(caminho_mobyan, caminho_ogea, usar_resolucoes_temporarias=Fal
         "Origem", "OS", "Resultado", "Técnico Roteirizado", "Técnico Atual",
         "Cidade", "Bairro / Distrito", "Cliente", "Serviço", "Status",
         "Data Limite", "Endereço", "Regra Aplicada", "Alias Aplicado", "Candidatos",
+        "Contratante",
     ]
     df = df[colunas].copy()
 
@@ -466,6 +480,17 @@ def criar_listas_pdf(df, tecnicos):
     return pd.DataFrame(linhas)
 
 
+def criar_mapa_contratante_mobyan(df):
+    """OS -> Contratante (GETNET/PUNTO) da Mobyan, usado por gerar_pdfs.py
+
+    para escolher a URL correta de cada OS na hora de baixar o PDF.
+    """
+    mobyan = df[df["Origem"] == "MOBYAN"][["OS", "Contratante"]].copy()
+    mobyan = mobyan[mobyan["OS"] != ""]
+    mobyan = mobyan.drop_duplicates(subset=["OS"], keep="last")
+    return mobyan.reset_index(drop=True)
+
+
 def gerar_planilha(df, regras, aliases, tecnicos):
     PASTA_SAIDA.mkdir(parents=True, exist_ok=True)
 
@@ -473,6 +498,7 @@ def gerar_planilha(df, regras, aliases, tecnicos):
     conflitos = df[df["Resultado"] == "CONFLITO"].copy()
     sem_rota = df[df["Resultado"] == "SEM ROTA"].copy()
     listas_pdf = criar_listas_pdf(df, tecnicos)
+    contratante_mobyan = criar_mapa_contratante_mobyan(df)
 
     caminho_temp = PASTA_SAIDA / "roteirizacao_em_processamento.xlsx"
 
@@ -483,6 +509,7 @@ def gerar_planilha(df, regras, aliases, tecnicos):
         conflitos.to_excel(writer, index=False, sheet_name="Conflitos")
         sem_rota.to_excel(writer, index=False, sheet_name="Sem Rota")
         listas_pdf.to_excel(writer, index=False, sheet_name="Listas PDF")
+        contratante_mobyan.to_excel(writer, index=False, sheet_name="Contratante Mobyan")
 
         regras.drop(columns=[c for c in regras.columns if c.startswith("_")], errors="ignore").to_excel(
             writer, index=False, sheet_name="Regras"
@@ -611,7 +638,10 @@ def formatar_planilha(caminho, df, tecnicos, origens_colunas):
     ws.column_dimensions["G"].width = 12
 
     # Roteiro Geral, conflitos, sem rota, listas e bases.
-    for nome in ["Roteiro Geral", "Conflitos", "Sem Rota", "Listas PDF", "Regras", "Aliases"]:
+    for nome in [
+        "Roteiro Geral", "Conflitos", "Sem Rota", "Listas PDF",
+        "Contratante Mobyan", "Regras", "Aliases",
+    ]:
         ws = wb[nome]
         formatar_cabecalho(ws)
 
@@ -622,7 +652,7 @@ def formatar_planilha(caminho, df, tecnicos, origens_colunas):
     larguras_geral = {
         "A": 12, "B": 13, "C": 16, "D": 22, "E": 22, "F": 20,
         "G": 28, "H": 38, "I": 28, "J": 22, "K": 20, "L": 48,
-        "M": 24, "N": 22, "O": 28,
+        "M": 24, "N": 22, "O": 28, "P": 18,
     }
     for nome in ["Roteiro Geral", "Conflitos", "Sem Rota"]:
         ws = wb[nome]
@@ -631,6 +661,10 @@ def formatar_planilha(caminho, df, tecnicos, origens_colunas):
 
     ws = wb["Listas PDF"]
     for letra, largura in {"A":20,"B":14,"C":90,"D":14,"E":90,"F":12}.items():
+        ws.column_dimensions[letra].width = largura
+
+    ws = wb["Contratante Mobyan"]
+    for letra, largura in {"A": 14, "B": 22}.items():
         ws.column_dimensions[letra].width = largura
 
     # Roteiro por Técnico.
@@ -685,9 +719,22 @@ def formatar_planilha(caminho, df, tecnicos, origens_colunas):
             ws.cell(row=row_idx, column=col_resultado).fill = fill
             ws.cell(row=row_idx, column=col_resultado).font = Font(bold=True)
 
+    # Destaca em laranja as OSs jogadas para a gaveta "Ajuste Manual", já que
+    # ficam com Resultado = ROTEIRIZADA e passariam despercebidas na cor verde.
+    ws = wb["Roteiro Geral"]
+    headers = [cell.value for cell in ws[1]]
+    if "Técnico Roteirizado" in headers:
+        col_tecnico = headers.index("Técnico Roteirizado") + 1
+        fill_ajuste = PatternFill("solid", fgColor=COR_AJUSTE_MANUAL)
+        for row_idx in range(2, ws.max_row + 1):
+            tecnico = str(ws.cell(row=row_idx, column=col_tecnico).value or "").strip().upper()
+            if tecnico == NOME_TECNICO_AJUSTE_MANUAL:
+                for col_idx in range(1, ws.max_column + 1):
+                    ws.cell(row=row_idx, column=col_idx).fill = fill_ajuste
+
     ordem = [
         "Resumo", "Roteiro Geral", "Roteiro por Técnico", "Conflitos",
-        "Sem Rota", "Listas PDF", "Regras", "Aliases",
+        "Sem Rota", "Listas PDF", "Contratante Mobyan", "Regras", "Aliases",
     ]
     wb._sheets = [wb[n] for n in ordem if n in wb.sheetnames]
     wb.active = 2 if "Roteiro por Técnico" in wb.sheetnames else 0

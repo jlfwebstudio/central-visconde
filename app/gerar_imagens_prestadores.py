@@ -1,3 +1,9 @@
+# ATENÇÃO: este script duplica de propósito a lógica de desenho de imagens de
+# exportador_mobyan.py (a partir de carregar_fonte_imagem(), por volta da
+# linha 1003). A duplicação é intencional: aqui o script funciona sozinho,
+# lendo a planilha de pendências já salva em disco, para regerar as imagens
+# sem precisar re-raspar a Mobyan. Se mudar o layout ou as cores em
+# exportador_mobyan.py, replique aqui também.
 import os
 import re
 from pathlib import Path
