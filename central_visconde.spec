@@ -75,7 +75,7 @@ if sys.platform == "darwin":
         icon=ICONE,
         bundle_identifier="com.centralvisconde.app",
         info_plist={
-            "CFBundleShortVersionString": "1.0.5",
+            "CFBundleShortVersionString": "1.0.6",
             "LSMinimumSystemVersion": "11.0",
             "NSHighResolutionCapable": True,
         },

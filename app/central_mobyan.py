@@ -789,16 +789,32 @@ class CentralVisconde:
             font=("Arial", 13, "bold"),
             anchor="w",
         ).pack(fill="x", pady=(0, 8))
-        ActionCard(
-            pagina,
+        gestao_rotas_linha = tk.Frame(pagina, bg=COR_FUNDO_2)
+        gestao_rotas_linha.pack(fill="x")
+        b3 = ActionCard(
+            gestao_rotas_linha,
             "Abrir Gestão Inteligente de Rotas",
             "Resolva bairros sem rota, crie aliases, edite regras e consulte o histórico sem abrir o Excel.",
             self.abrir_gestao_rotas,
             COR_DOURADO,
             COR_DOURADO_HOVER,
-            largura=790,
+            largura=520,
             altura=100,
-        ).pack(fill="x")
+        )
+        b3.grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        b4 = ActionCard(
+            gestao_rotas_linha,
+            "Gerenciar Técnicos",
+            "Cadastre, edite ou desative técnicos pra eles já aparecerem prontos nas regras e pendências.",
+            self.abrir_gestao_tecnicos,
+            COR_LARANJA,
+            COR_LARANJA_HOVER,
+            largura=260,
+            altura=100,
+        )
+        b4.grid(row=0, column=1, sticky="ew")
+        gestao_rotas_linha.grid_columnconfigure(0, weight=2)
+        gestao_rotas_linha.grid_columnconfigure(1, weight=1)
 
     def criar_pagina_ferramentas(self):
         pagina = self.nova_pagina("ferramentas")
@@ -1357,7 +1373,7 @@ class CentralVisconde:
         except Exception:
             pass
 
-    def abrir_gestao_rotas(self):
+    def abrir_gestao_rotas(self, aba_inicial=None):
         if abrir_gestao_rotas is None:
             messagebox.showerror(
                 "Gestão de Rotas",
@@ -1370,13 +1386,15 @@ class CentralVisconde:
                 and self.janela_gestao_rotas.win.winfo_exists()
             ):
                 self.janela_gestao_rotas.recarregar_tudo()
+                if aba_inicial == "Técnicos":
+                    self.janela_gestao_rotas.notebook.select(self.janela_gestao_rotas.tab_tecnicos)
                 self.janela_gestao_rotas.win.deiconify()
                 self.janela_gestao_rotas.win.lift()
                 self.janela_gestao_rotas.win.focus_force()
                 return
 
             self.janela_gestao_rotas = abrir_gestao_rotas(
-                self.root, on_change=self.atualizar_resumo_rotas
+                self.root, on_change=self.atualizar_resumo_rotas, aba_inicial=aba_inicial
             )
             self.janela_gestao_rotas.win.protocol("WM_DELETE_WINDOW", self.fechar_gestao_rotas)
             self.janela_gestao_rotas.win.lift()
@@ -1384,6 +1402,9 @@ class CentralVisconde:
         except Exception as erro:
             self.janela_gestao_rotas = None
             messagebox.showerror("Gestão de Rotas", f"Não consegui abrir o módulo:\n\n{erro}")
+
+    def abrir_gestao_tecnicos(self):
+        self.abrir_gestao_rotas(aba_inicial="Técnicos")
 
     def abrir_base_rotas(self):
         if ARQUIVO_REGRAS_ROTEIRIZACAO.exists():

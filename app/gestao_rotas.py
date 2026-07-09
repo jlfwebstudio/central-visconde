@@ -47,6 +47,7 @@ CAB_REGRAS = [
 CAB_ALIASES = [
     "Ativo", "Cidade", "Nome recebido", "Nome considerado", "Técnico", "Observação", "Origem",
 ]
+CAB_TECNICOS = ["Ativo", "Técnico", "Observação"]
 CAB_HISTORICO = [
     "Data/Hora", "Tipo", "Ação", "Origem", "Cidade", "Chave",
     "Valor novo", "Valor anterior", "Observação", "Usuário",
@@ -251,6 +252,21 @@ def garantir_estrutura_base(caminho=ARQUIVO_REGRAS, criar_backup=False):
                 if nome == "Origem":
                     for linha in range(2, ws.max_row + 1):
                         ws.cell(linha, col, "AMBOS")
+                cab.append(nome)
+                alterou = True
+
+    if "Técnicos" not in wb.sheetnames:
+        ws = wb.create_sheet("Técnicos")
+        ws.append(CAB_TECNICOS)
+        alterou = True
+    else:
+        ws = wb["Técnicos"]
+        cab = [str(c.value or "").strip() for c in ws[1]]
+        for nome in CAB_TECNICOS:
+            if nome not in cab:
+                col = ws.max_column + 1
+                cell = ws.cell(1, col, nome)
+                _copiar_estilo_cabecalho(ws.cell(1, max(1, col - 1)), cell)
                 cab.append(nome)
                 alterou = True
 
@@ -465,8 +481,44 @@ class RepositorioRotas:
         wb.save(self.caminho)
         return destino
 
+    def salvar_tecnico(self, registro, linha=None):
+        criar_backup_base("antes_tecnico")
+        garantir_estrutura_base(self.caminho)
+        wb = load_workbook(self.caminho)
+        ws = wb["Técnicos"]
+        cab = _cabecalhos(ws)
+
+        nome_norm = normalizar_texto(registro.get("Técnico"))
+
+        linha_encontrada = None
+        for row in range(2, ws.max_row + 1):
+            atual = _linha_dict(ws, row)
+            if normalizar_texto(atual.get("Técnico")) == nome_norm:
+                linha_encontrada = row
+                break
+
+        destino = int(linha or linha_encontrada or (ws.max_row + 1))
+        anterior = _linha_dict(ws, destino) if destino <= ws.max_row else {}
+        registro = dict(registro)
+        registro["Ativo"] = registro.get("Ativo") or "Sim"
+        registro["Técnico"] = str(registro.get("Técnico") or "").strip()
+
+        for nome in CAB_TECNICOS:
+            col = cab.get(nome)
+            if col:
+                ws.cell(destino, col, registro.get(nome, ""))
+
+        _registrar_historico(
+            wb, "TECNICO", "EDITAR" if anterior else "CRIAR", "",
+            "", registro.get("Técnico", ""), registro.get("Ativo", ""),
+            anterior.get("Ativo", "") if anterior else "",
+            registro.get("Observação", ""),
+        )
+        wb.save(self.caminho)
+        return destino
+
     def alternar_ativo(self, aba, linha):
-        if aba not in {"Regras", "Aliases"}:
+        if aba not in {"Regras", "Aliases", "Técnicos"}:
             return
         criar_backup_base("antes_status")
         wb = load_workbook(self.caminho)
@@ -480,9 +532,10 @@ class RepositorioRotas:
         novo = "Não" if ativo(anterior) else "Sim"
         ws.cell(linha, col_ativo, novo)
         registro = _linha_dict(ws, linha)
-        chave = registro.get("Bairro / Localidade Normalizada") or registro.get("Nome recebido") or ""
+        chave = registro.get("Bairro / Localidade Normalizada") or registro.get("Nome recebido") or registro.get("Técnico") or ""
+        tipo = {"Regras": "REGRA", "Aliases": "ALIAS", "Técnicos": "TECNICO"}[aba]
         _registrar_historico(
-            wb, "REGRA" if aba == "Regras" else "ALIAS", "ATIVAR" if novo == "Sim" else "DESATIVAR",
+            wb, tipo, "ATIVAR" if novo == "Sim" else "DESATIVAR",
             registro.get("Origem", ""), registro.get("Cidade", ""), chave, novo, anterior,
             "Alteração realizada pela Gestão de Rotas",
         )
@@ -547,7 +600,7 @@ def obter_resumo_rotas():
 
 
 class GestaoRotasWindow:
-    def __init__(self, parent, on_change=None):
+    def __init__(self, parent, on_change=None, aba_inicial=None):
         self.parent = parent
         self.on_change = on_change
         self.repo = RepositorioRotas()
@@ -566,6 +619,9 @@ class GestaoRotasWindow:
         self._configurar_estilo()
         self._montar()
         self.recarregar_tudo()
+
+        if aba_inicial == "Técnicos":
+            self.notebook.select(self.tab_tecnicos)
 
     def _configurar_estilo(self):
         style = ttk.Style(self.win)
@@ -594,7 +650,14 @@ class GestaoRotasWindow:
             font=("Arial", 9, "bold"), relief="flat",
         )
         style.map("Visconde.Treeview.Heading", background=[("active", "#303030")])
-        style.configure("Visconde.TCombobox", fieldbackground="#1B1B1B", background="#1B1B1B", foreground="#111111")
+        style.configure("Visconde.TCombobox", fieldbackground="#1B1B1B", background="#1B1B1B", foreground=COR_BRANCO)
+        style.map(
+            "Visconde.TCombobox",
+            fieldbackground=[("readonly", "#1B1B1B")],
+            foreground=[("readonly", COR_BRANCO)],
+            selectforeground=[("!focus", COR_BRANCO), ("focus", "#111111")],
+            selectbackground=[("!focus", "#1B1B1B"), ("focus", COR_DOURADO)],
+        )
 
     def _montar(self):
         topo = tk.Frame(self.win, bg=COR_FUNDO)
@@ -619,15 +682,18 @@ class GestaoRotasWindow:
         self.tab_pendencias = tk.Frame(self.notebook, bg=COR_FUNDO_2)
         self.tab_regras = tk.Frame(self.notebook, bg=COR_FUNDO_2)
         self.tab_aliases = tk.Frame(self.notebook, bg=COR_FUNDO_2)
+        self.tab_tecnicos = tk.Frame(self.notebook, bg=COR_FUNDO_2)
         self.tab_historico = tk.Frame(self.notebook, bg=COR_FUNDO_2)
         self.notebook.add(self.tab_pendencias, text="Pendências")
         self.notebook.add(self.tab_regras, text="Regras")
         self.notebook.add(self.tab_aliases, text="Aliases")
+        self.notebook.add(self.tab_tecnicos, text="Técnicos")
         self.notebook.add(self.tab_historico, text="Histórico")
 
         self._montar_pendencias()
         self._montar_regras()
         self._montar_aliases()
+        self._montar_tecnicos()
         self._montar_historico()
 
         rodape = tk.Frame(self.win, bg=COR_FUNDO)
@@ -765,6 +831,32 @@ class GestaoRotasWindow:
         self._botao(botoes, "Editar selecionado", self.editar_alias, COR_AZUL, COR_BRANCO).pack(side="left")
         self._botao(botoes, "Ativar / desativar", lambda: self.alternar_item("Aliases"), COR_LARANJA, COR_BRANCO).pack(side="left", padx=8)
 
+    def _montar_tecnicos(self):
+        topo = tk.Frame(self.tab_tecnicos, bg=COR_FUNDO_2)
+        topo.pack(fill="x", padx=12, pady=(12, 8))
+        tk.Label(topo, text="Técnicos cadastrados", bg=COR_FUNDO_2, fg=COR_BRANCO, font=("Arial", 11, "bold")).pack(side="left")
+        self.var_filtro_tecnicos = tk.StringVar()
+        entrada = tk.Entry(topo, textvariable=self.var_filtro_tecnicos, bg="#1B1B1B", fg=COR_BRANCO, insertbackground=COR_DOURADO, relief="flat")
+        entrada.pack(side="left", fill="x", expand=True, padx=12, ipady=6)
+        entrada.bind("<KeyRelease>", lambda e: self._carregar_tree_tecnicos())
+        self._botao(topo, "Novo técnico", lambda: self._dialog_tecnico(), COR_DOURADO).pack(side="right")
+
+        tk.Label(
+            self.tab_tecnicos,
+            text="Cadastre aqui os técnicos pra eles já aparecerem prontos na hora de criar regras e resolver pendências.",
+            bg=COR_FUNDO_2, fg=COR_TEXTO_FRACO, font=("Arial", 9), anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
+        cols = ["Ativo", "Técnico", "Observação"]
+        cont, self.tree_tecnicos = self._tree(self.tab_tecnicos, cols, [55, 260, 400])
+        cont.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        self.tree_tecnicos.bind("<Double-1>", lambda e: self.editar_tecnico())
+
+        botoes = tk.Frame(self.tab_tecnicos, bg=COR_FUNDO_2)
+        botoes.pack(fill="x", padx=12, pady=(0, 12))
+        self._botao(botoes, "Editar selecionado", self.editar_tecnico, COR_AZUL, COR_BRANCO).pack(side="left")
+        self._botao(botoes, "Ativar / desativar", lambda: self.alternar_item("Técnicos"), COR_LARANJA, COR_BRANCO).pack(side="left", padx=8)
+
     def _montar_historico(self):
         topo = tk.Frame(self.tab_historico, bg=COR_FUNDO_2)
         topo.pack(fill="x", padx=12, pady=(12, 8))
@@ -782,6 +874,7 @@ class GestaoRotasWindow:
             self._carregar_tree_pendencias()
             self._carregar_tree_regras()
             self._carregar_tree_aliases()
+            self._carregar_tree_tecnicos()
             self._carregar_tree_historico()
             self.status.config(text="Dados atualizados.", fg=COR_VERDE)
             if self.on_change:
@@ -990,7 +1083,7 @@ class GestaoRotasWindow:
     def _reprocessar(self, usar_temporarias):
         if self._processando:
             return
-        if not SCRIPT_ROTEIRIZACAO.exists():
+        if not FROZEN and not SCRIPT_ROTEIRIZACAO.exists():
             messagebox.showerror("Roteirização", f"Script não encontrado:\n{SCRIPT_ROTEIRIZACAO}", parent=self.win)
             return
         self._processando = True
@@ -1108,6 +1201,18 @@ class GestaoRotasWindow:
                 ),
             )
 
+    def _carregar_tree_tecnicos(self):
+        self._limpar_tree(self.tree_tecnicos)
+        filtro = normalizar_texto(self.var_filtro_tecnicos.get())
+        for r in self.dados.get("Técnicos", []):
+            texto = normalizar_texto(" ".join(str(r.get(k) or "") for k in CAB_TECNICOS))
+            if filtro and filtro not in texto:
+                continue
+            self.tree_tecnicos.insert(
+                "", "end", iid=str(r["_linha"]),
+                values=(r.get("Ativo", ""), r.get("Técnico", ""), r.get("Observação", "")),
+            )
+
     def _carregar_tree_historico(self):
         self._limpar_tree(self.tree_historico)
         historico = list(reversed(self.dados.get("Histórico", [])))[:500]
@@ -1212,6 +1317,34 @@ class GestaoRotasWindow:
 
         self._form_dialog("Alias de bairro/localidade", campos, valores, salvar)
 
+    def _dialog_tecnico(self, registro=None):
+        registro = registro or {}
+        campos = [
+            ("Ativo", "combo", ["Sim", "Não"]),
+            ("Técnico", "text", None),
+            ("Observação", "text", None),
+        ]
+        valores = {nome: registro.get(nome, "") for nome, _, _ in campos}
+        valores.setdefault("Ativo", "Sim")
+        linha = registro.get("_linha")
+
+        def salvar(dados):
+            if not dados["Técnico"]:
+                raise ValueError("Informe o nome do técnico.")
+            self.repo.salvar_tecnico(dados, linha=linha)
+
+        self._form_dialog("Técnico", campos, valores, salvar)
+
+    def editar_tecnico(self):
+        sel = self.tree_tecnicos.selection()
+        if not sel:
+            messagebox.showwarning("Técnicos", "Selecione um técnico.", parent=self.win)
+            return
+        linha = int(sel[0])
+        registro = next((r for r in self.dados.get("Técnicos", []) if r.get("_linha") == linha), None)
+        if registro:
+            self._dialog_tecnico(registro)
+
     def editar_regra(self):
         sel = self.tree_regras.selection()
         if not sel:
@@ -1233,7 +1366,8 @@ class GestaoRotasWindow:
             self._dialog_alias(registro)
 
     def alternar_item(self, aba):
-        tree = self.tree_regras if aba == "Regras" else self.tree_aliases
+        arvores = {"Regras": self.tree_regras, "Aliases": self.tree_aliases, "Técnicos": self.tree_tecnicos}
+        tree = arvores[aba]
         sel = tree.selection()
         if not sel:
             messagebox.showwarning(aba, "Selecione um item.", parent=self.win)
@@ -1251,5 +1385,5 @@ class GestaoRotasWindow:
             messagebox.showwarning("Roteirização", "Ainda não existe uma roteirização atual.", parent=self.win)
 
 
-def abrir_gestao_rotas(parent, on_change=None):
-    return GestaoRotasWindow(parent, on_change=on_change)
+def abrir_gestao_rotas(parent, on_change=None, aba_inicial=None):
+    return GestaoRotasWindow(parent, on_change=on_change, aba_inicial=aba_inicial)
