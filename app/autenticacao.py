@@ -7,8 +7,17 @@ import urllib.error
 import urllib.request
 from tkinter import messagebox
 
-from caminho_base import BASE_DIR
+try:
+    from PIL import Image, ImageTk
+except Exception:
+    Image = None
+    ImageTk = None
+
+from caminho_base import BASE_DIR, RECURSOS_DIR
 from versao import VERSAO_ATUAL
+
+ARQUIVO_ICONE_PNG = RECURSOS_DIR / "assets" / "logo_visconde_app.png"
+ARQUIVO_ICONE_ICO = RECURSOS_DIR / "assets" / "logo_visconde.ico"
 
 PASTA_CONFIG = BASE_DIR / "config"
 ARQUIVO_SESSAO = PASTA_CONFIG / "sessao.json"
@@ -394,8 +403,31 @@ def garantir_sessao_valida():
         return _abrir_janela_login()
 
 
+def _configurar_icone_janela(root):
+    """Evita que o Windows prenda o ícone genérico na barra de tarefas — essa
+    é a primeira janela do processo, então precisa do mesmo ícone custom que
+    central_mobyan.py aplica na janela principal (ver configurar_icone_janela
+    lá), senão o Windows já "trava" o ícone padrão nesse momento inicial."""
+    if ARQUIVO_ICONE_PNG.exists() and Image is not None and ImageTk is not None:
+        try:
+            imagem = Image.open(ARQUIVO_ICONE_PNG)
+            imagem.thumbnail((256, 256), Image.Resampling.LANCZOS)
+            icone = ImageTk.PhotoImage(imagem)
+            root._icone_visconde = icone
+            root.iconphoto(True, icone)
+        except Exception:
+            pass
+
+    if os.name == "nt" and ARQUIVO_ICONE_ICO.exists():
+        try:
+            root.iconbitmap(default=str(ARQUIVO_ICONE_ICO))
+        except Exception:
+            pass
+
+
 def _abrir_janela_login():
     root = tk.Tk()
+    _configurar_icone_janela(root)
     janela = _JanelaAutenticacao(root)
     root.mainloop()
     return janela.autenticado

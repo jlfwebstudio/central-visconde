@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import pandas as pd
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 
@@ -211,7 +211,9 @@ def _copiar_estilo_cabecalho(origem, destino):
 def garantir_estrutura_base(caminho=ARQUIVO_REGRAS, criar_backup=False):
     caminho = Path(caminho)
     if not caminho.exists():
-        raise FileNotFoundError(f"Base de rotas não encontrada: {caminho}")
+        caminho.parent.mkdir(parents=True, exist_ok=True)
+        Workbook().save(caminho)
+        criar_backup = False
 
     if criar_backup:
         criar_backup_base("migracao")
@@ -271,6 +273,10 @@ def garantir_estrutura_base(caminho=ARQUIVO_REGRAS, criar_backup=False):
                 _copiar_estilo_cabecalho(ws.cell(1, max(1, col - 1)), cell)
                 cab.append(nome)
                 alterou = True
+
+    if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
+        wb.remove(wb["Sheet"])
+        alterou = True
 
     if alterou:
         wb.save(caminho)

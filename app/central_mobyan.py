@@ -1590,6 +1590,7 @@ def instalar_chromium_com_progresso(root, ao_concluir):
     Tudo que acontece aqui é registrado em ARQUIVO_LOG_NAVEGADOR — se isso
     falhar numa máquina que não temos acesso direto, esse arquivo é o que
     permite diagnosticar sem depender de descrever o erro por texto."""
+    configurar_icone_janela(root)
     janela = tk.Toplevel(root)
     janela.title("Central Visconde")
     janela.configure(bg=COR_FUNDO)

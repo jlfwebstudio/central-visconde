@@ -16,6 +16,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from baixar_relatorios_roteirizacao import baixar_relatorios_automaticamente
+from gestao_rotas import garantir_estrutura_base
 
 
 from caminho_base import BASE_DIR
@@ -177,11 +178,7 @@ def preparar_ogea(caminho):
 
 
 def ler_regras():
-    if not ARQUIVO_REGRAS.exists():
-        raise FileNotFoundError(
-            f"Base de regras não encontrada: {ARQUIVO_REGRAS}\n"
-            "Copie regras_roteirizacao.xlsx para a pasta bases do projeto."
-        )
+    garantir_estrutura_base(ARQUIVO_REGRAS)
 
     regras = pd.read_excel(
         ARQUIVO_REGRAS,
