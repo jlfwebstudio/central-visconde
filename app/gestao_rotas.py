@@ -703,7 +703,7 @@ class GestaoRotasWindow:
         self.combo_sugestao.bind("<<ComboboxSelected>>", self._sugestao_mudou)
 
         self._label(direita, "Técnico responsável").pack(fill="x", padx=16)
-        self.combo_tecnico = ttk.Combobox(direita, state="readonly", style="Visconde.TCombobox")
+        self.combo_tecnico = ttk.Combobox(direita, state="normal", style="Visconde.TCombobox")
         self.combo_tecnico.pack(fill="x", padx=16, pady=(3, 12))
 
         self.btn_salvar_alias = self._botao(
@@ -1136,8 +1136,9 @@ class GestaoRotasWindow:
             tk.Label(frame, text=nome, bg=COR_FUNDO, fg=COR_TEXTO, font=("Arial", 9)).pack(fill="x", pady=(6, 2))
             var = tk.StringVar(value=str(valores.get(nome, "") or ""))
             vars_[nome] = var
-            if tipo == "combo":
-                widget = ttk.Combobox(frame, textvariable=var, values=opcoes, state="readonly", style="Visconde.TCombobox")
+            if tipo in ("combo", "combo_editavel"):
+                estado = "readonly" if tipo == "combo" else "normal"
+                widget = ttk.Combobox(frame, textvariable=var, values=opcoes, state=estado, style="Visconde.TCombobox")
             else:
                 widget = tk.Entry(frame, textvariable=var, bg="#1B1B1B", fg=COR_BRANCO, insertbackground=COR_DOURADO, relief="flat")
             widget.pack(fill="x", ipady=5)
@@ -1161,7 +1162,7 @@ class GestaoRotasWindow:
         campos = [
             ("Ativo", "combo", ["Sim", "Não"]),
             ("Prioridade", "text", None),
-            ("Técnico", "combo", self.repo.tecnicos_ativos()),
+            ("Técnico", "combo_editavel", self.repo.tecnicos_ativos()),
             ("Tipo de Regra", "combo", ["Cidade + bairro", "Cidade inteira"]),
             ("Cidade", "text", None),
             ("Bairro / Localidade Normalizada", "text", None),
@@ -1195,7 +1196,7 @@ class GestaoRotasWindow:
             ("Cidade", "text", None),
             ("Nome recebido", "text", None),
             ("Nome considerado", "text", None),
-            ("Técnico", "combo", [""] + self.repo.tecnicos_ativos()),
+            ("Técnico", "combo_editavel", [""] + self.repo.tecnicos_ativos()),
             ("Origem", "combo", ["AMBOS", "MOBYAN", "OGEA"]),
             ("Observação", "text", None),
         ]
