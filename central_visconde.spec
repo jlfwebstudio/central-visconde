@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Build (onedir) da Central Visconde para distribuição a clientes, sem
+"""Build (onedir) do ViscondeApp para distribuição a clientes, sem
 depender de Python instalado na máquina de destino.
 
 Uso: .venv/bin/pyinstaller central_visconde.spec (limpa builds antigas com
@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 RAIZ = Path(SPECPATH)
-NOME_APP = "Central Visconde"
+NOME_APP = "ViscondeApp"
 
 # Módulos hoje só referenciados por caminho de arquivo (subprocess), nunca por
 # `import` estático — o PyInstaller não os descobre sozinho, então precisam
@@ -73,9 +73,12 @@ if sys.platform == "darwin":
         coll,
         name=f"{NOME_APP}.app",
         icon=ICONE,
+        # Mantido igual ao já publicado (não segue o rebrand pra "ViscondeApp"):
+        # trocar isso faz o macOS tratar como um app diferente do já instalado,
+        # perdendo permissões concedidas em máquinas que já rodam o app.
         bundle_identifier="com.centralvisconde.app",
         info_plist={
-            "CFBundleShortVersionString": "1.0.6",
+            "CFBundleShortVersionString": "1.1.0",
             "LSMinimumSystemVersion": "11.0",
             "NSHighResolutionCapable": True,
         },

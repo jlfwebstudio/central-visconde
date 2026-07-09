@@ -26,19 +26,22 @@ ARQUIVO_TEMPORARIO = BASE_DIR / "outputs" / "roteirizacao" / "resolucoes_tempora
 SCRIPT_ROTEIRIZACAO = RECURSOS_DIR / "app" / "gerar_roteirizacao.py"
 PASTA_BACKUPS = BASE_DIR / "bases" / "backups_roteirizacao"
 
-COR_FUNDO = "#080808"
-COR_FUNDO_2 = "#101010"
-COR_CARD = "#171717"
-COR_BORDA = "#584A18"
-COR_DOURADO = "#F4C430"
-COR_DOURADO_ESCURO = "#9B7910"
-COR_BRANCO = "#F5F5F5"
-COR_TEXTO = "#D5D5D5"
-COR_TEXTO_FRACO = "#929292"
-COR_VERDE = "#2EAD68"
-COR_VERMELHO = "#D14949"
-COR_AZUL = "#3278C8"
-COR_LARANJA = "#D88A24"
+from estilo_visconde import (
+    COR_AZUL,
+    COR_BORDA,
+    COR_BRANCO,
+    COR_CARD,
+    COR_CARD_HOVER,
+    COR_DOURADO,
+    COR_DOURADO_ESCURO,
+    COR_FUNDO,
+    COR_FUNDO_2,
+    COR_LARANJA,
+    COR_TEXTO_FRACO,
+    COR_TEXTO_SECUNDARIO,
+    COR_VERDE,
+    COR_VERMELHO,
+)
 
 CAB_REGRAS = [
     "Ativo", "Prioridade", "Técnico", "Tipo de Regra", "Cidade",
@@ -132,6 +135,47 @@ class BotaoVisconde(tk.Label):
                 cursor="arrow",
                 highlightbackground="#3A3A3A",
             )
+
+
+class BarraAbas(tk.Frame):
+    """Seletor de abas em formato de pílulas — o ttk.Notebook não dá pra
+    estilizar de forma confiável entre plataformas (fica sempre como
+    retângulo liso do tema clam), então essa barra assume esse papel
+    visualmente enquanto os painéis de conteúdo continuam sendo os mesmos
+    tk.Frame de sempre, só trocando de visibilidade via .lift()."""
+
+    def __init__(self, parent, abas):
+        super().__init__(parent, bg=COR_FUNDO)
+        self._paineis = {}
+        self._rotulos = {}
+        self._ativa = None
+        for nome, painel in abas:
+            self._paineis[nome] = painel
+            rotulo = tk.Label(
+                self, text=nome, bg=COR_CARD, fg=COR_TEXTO_SECUNDARIO,
+                font=("Arial", 10, "bold"), padx=18, pady=9, cursor="hand2",
+            )
+            rotulo.pack(side="left", padx=(0, 6))
+            rotulo.bind("<Button-1>", lambda evento, n=nome: self.selecionar(n))
+            rotulo.bind("<Enter>", lambda evento, n=nome: self._hover(n, True))
+            rotulo.bind("<Leave>", lambda evento, n=nome: self._hover(n, False))
+            self._rotulos[nome] = rotulo
+        if abas:
+            self.selecionar(abas[0][0])
+
+    def _hover(self, nome, entrando):
+        if nome == self._ativa:
+            return
+        self._rotulos[nome].configure(bg=COR_CARD_HOVER if entrando else COR_CARD)
+
+    def selecionar(self, nome):
+        if nome not in self._paineis:
+            return
+        if self._ativa is not None:
+            self._rotulos[self._ativa].configure(bg=COR_CARD, fg=COR_TEXTO_SECUNDARIO)
+        self._rotulos[nome].configure(bg=COR_DOURADO_ESCURO, fg=COR_BRANCO)
+        self._paineis[nome].lift()
+        self._ativa = nome
 
 
 def normalizar_texto(valor):
@@ -610,7 +654,7 @@ class GestaoRotasWindow:
         self._processando = False
 
         self.win = tk.Toplevel(parent)
-        self.win.title("Gestão Inteligente de Rotas — Central Visconde")
+        self.win.title("Gestão Inteligente de Rotas — ViscondeApp")
         self.win.configure(bg=COR_FUNDO)
         self.win.geometry("1260x790")
         self.win.minsize(1080, 680)
@@ -620,8 +664,8 @@ class GestaoRotasWindow:
         self._montar()
         self.recarregar_tudo()
 
-        if aba_inicial == "Técnicos":
-            self.notebook.select(self.tab_tecnicos)
+        if aba_inicial:
+            self.barra_abas.selecionar(aba_inicial)
 
     def _configurar_estilo(self):
         style = ttk.Style(self.win)
@@ -629,19 +673,9 @@ class GestaoRotasWindow:
             style.theme_use("clam")
         except Exception:
             pass
-        style.configure("Visconde.TNotebook", background=COR_FUNDO, borderwidth=0)
-        style.configure(
-            "Visconde.TNotebook.Tab", background=COR_CARD, foreground=COR_TEXTO,
-            padding=(16, 9), font=("Arial", 10, "bold"),
-        )
-        style.map(
-            "Visconde.TNotebook.Tab",
-            background=[("selected", COR_DOURADO_ESCURO)],
-            foreground=[("selected", COR_BRANCO)],
-        )
         style.configure(
             "Visconde.Treeview", background="#111111", fieldbackground="#111111",
-            foreground=COR_TEXTO, rowheight=27, bordercolor=COR_BORDA,
+            foreground=COR_TEXTO_SECUNDARIO, rowheight=27, bordercolor=COR_BORDA,
             font=("Arial", 9),
         )
         style.map("Visconde.Treeview", background=[("selected", "#5A4812")], foreground=[("selected", COR_BRANCO)])
@@ -676,19 +710,31 @@ class GestaoRotasWindow:
             bg=COR_FUNDO, fg=COR_TEXTO_FRACO, font=("Arial", 10), anchor="w",
         ).pack(fill="x", padx=22, pady=(0, 10))
 
-        self.notebook = ttk.Notebook(self.win, style="Visconde.TNotebook")
-        self.notebook.pack(fill="both", expand=True, padx=22, pady=(0, 14))
+        abas_container = tk.Frame(self.win, bg=COR_FUNDO_2)
 
-        self.tab_pendencias = tk.Frame(self.notebook, bg=COR_FUNDO_2)
-        self.tab_regras = tk.Frame(self.notebook, bg=COR_FUNDO_2)
-        self.tab_aliases = tk.Frame(self.notebook, bg=COR_FUNDO_2)
-        self.tab_tecnicos = tk.Frame(self.notebook, bg=COR_FUNDO_2)
-        self.tab_historico = tk.Frame(self.notebook, bg=COR_FUNDO_2)
-        self.notebook.add(self.tab_pendencias, text="Pendências")
-        self.notebook.add(self.tab_regras, text="Regras")
-        self.notebook.add(self.tab_aliases, text="Aliases")
-        self.notebook.add(self.tab_tecnicos, text="Técnicos")
-        self.notebook.add(self.tab_historico, text="Histórico")
+        self.tab_pendencias = tk.Frame(abas_container, bg=COR_FUNDO_2)
+        self.tab_regras = tk.Frame(abas_container, bg=COR_FUNDO_2)
+        self.tab_aliases = tk.Frame(abas_container, bg=COR_FUNDO_2)
+        self.tab_tecnicos = tk.Frame(abas_container, bg=COR_FUNDO_2)
+        self.tab_historico = tk.Frame(abas_container, bg=COR_FUNDO_2)
+        for painel in (
+            self.tab_pendencias, self.tab_regras, self.tab_aliases,
+            self.tab_tecnicos, self.tab_historico,
+        ):
+            painel.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        self.barra_abas = BarraAbas(
+            self.win,
+            [
+                ("Pendências", self.tab_pendencias),
+                ("Regras", self.tab_regras),
+                ("Aliases", self.tab_aliases),
+                ("Técnicos", self.tab_tecnicos),
+                ("Histórico", self.tab_historico),
+            ],
+        )
+        self.barra_abas.pack(fill="x", padx=22, pady=(0, 10))
+        abas_container.pack(fill="both", expand=True, padx=22, pady=(0, 14))
 
         self._montar_pendencias()
         self._montar_regras()
@@ -730,7 +776,7 @@ class GestaoRotasWindow:
         return BotaoVisconde(parent, texto, comando, cor, fg, width=width)
 
     def _label(self, parent, texto):
-        return tk.Label(parent, text=texto, bg=COR_CARD, fg=COR_TEXTO, font=("Arial", 9), anchor="w")
+        return tk.Label(parent, text=texto, bg=COR_CARD, fg=COR_TEXTO_SECUNDARIO, font=("Arial", 9), anchor="w")
 
     def _montar_pendencias(self):
         paned = tk.PanedWindow(self.tab_pendencias, orient="horizontal", bg=COR_FUNDO_2, sashwidth=6, bd=0)
@@ -754,7 +800,7 @@ class GestaoRotasWindow:
 
         tk.Label(direita, text="Resolver pendência", bg=COR_CARD, fg=COR_DOURADO, font=("Arial", 14, "bold"), anchor="w").pack(fill="x", padx=16, pady=(16, 8))
         self.lbl_detalhes = tk.Label(
-            direita, text="Selecione um caso à esquerda.", bg=COR_CARD, fg=COR_TEXTO,
+            direita, text="Selecione um caso à esquerda.", bg=COR_CARD, fg=COR_TEXTO_SECUNDARIO,
             font=("Arial", 9), justify="left", anchor="nw", wraplength=360,
         )
         self.lbl_detalhes.pack(fill="x", padx=16, pady=(0, 12))
@@ -1093,7 +1139,7 @@ class GestaoRotasWindow:
         progresso.geometry("700x390")
         progresso.configure(bg=COR_FUNDO)
         progresso.transient(self.win)
-        texto = tk.Text(progresso, bg="#050505", fg=COR_TEXTO, insertbackground=COR_DOURADO, font=(("Consolas" if os.name == "nt" else "Menlo"), 9), wrap="word")
+        texto = tk.Text(progresso, bg="#050505", fg=COR_TEXTO_SECUNDARIO, insertbackground=COR_DOURADO, font=(("Consolas" if os.name == "nt" else "Menlo"), 9), wrap="word")
         texto.pack(fill="both", expand=True, padx=12, pady=12)
         texto.insert("end", "Reprocessando os relatórios que já foram baixados...\n\n")
         texto.config(state="disabled")
@@ -1238,7 +1284,7 @@ class GestaoRotasWindow:
         frame.pack(fill="both", expand=True, padx=24, pady=20)
         tk.Label(frame, text=titulo, bg=COR_FUNDO, fg=COR_DOURADO, font=("Arial", 16, "bold")).pack(anchor="w", pady=(0, 14))
         for nome, tipo, opcoes in campos:
-            tk.Label(frame, text=nome, bg=COR_FUNDO, fg=COR_TEXTO, font=("Arial", 9)).pack(fill="x", pady=(6, 2))
+            tk.Label(frame, text=nome, bg=COR_FUNDO, fg=COR_TEXTO_SECUNDARIO, font=("Arial", 9)).pack(fill="x", pady=(6, 2))
             var = tk.StringVar(value=str(valores.get(nome, "") or ""))
             vars_[nome] = var
             if tipo in ("combo", "combo_editavel"):

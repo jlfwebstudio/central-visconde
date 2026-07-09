@@ -35,18 +35,18 @@ jobs:
         if: matrix.nome == 'mac'
         run: |
           cd dist
-          zip -r -y "../CentralVisconde-mac.zip" "Central Visconde.app"
+          zip -r -y "../ViscondeApp-mac.zip" "ViscondeApp.app"
 
       - name: Empacotar build (Windows)
         if: matrix.nome == 'windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/Central Visconde" -DestinationPath "CentralVisconde-windows.zip"
+          Compress-Archive -Path "dist/ViscondeApp" -DestinationPath "ViscondeApp-windows.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CentralVisconde-${{ matrix.nome }}
-          path: CentralVisconde-${{ matrix.nome }}.zip
+          name: ViscondeApp-${{ matrix.nome }}
+          path: ViscondeApp-${{ matrix.nome }}.zip
 
   release:
     needs: build

@@ -324,7 +324,7 @@ def materializar_env(config_conta):
     config_extra = config_conta.get("config", {})
 
     linhas = [
-        "# Gerado automaticamente a partir da conta logada no Central Visconde.",
+        "# Gerado automaticamente a partir da conta logada no ViscondeApp.",
         "# Não edite à mão — as credenciais são gerenciadas pela conta.",
         "",
     ]
@@ -444,7 +444,7 @@ class _JanelaAutenticacao:
         self.token = None
         self.usuario = None
 
-        self.root.title("Central Visconde — Entrar")
+        self.root.title("ViscondeApp — Entrar")
         self.root.configure(bg=COR_FUNDO)
         self.root.geometry("460x560")
         self.root.minsize(420, 520)
@@ -535,7 +535,7 @@ class _JanelaAutenticacao:
 
     def _mostrar_login(self):
         self._limpar_container()
-        self._titulo("Central Visconde", "Entre com a sua conta ou crie uma nova.")
+        self._titulo("ViscondeApp", "Entre com a sua conta ou crie uma nova.")
 
         self.campo_usuario = self._campo("Usuário")
         self.campo_senha = self._campo("Senha", mostrar="*")
@@ -554,7 +554,7 @@ class _JanelaAutenticacao:
         senha = self.campo_senha.get()
 
         if not usuario or not senha:
-            messagebox.showwarning("Central Visconde", "Preencha usuário e senha.")
+            messagebox.showwarning("ViscondeApp", "Preencha usuário e senha.")
             return
 
         try:
@@ -565,12 +565,12 @@ class _JanelaAutenticacao:
             salvar_sessao_local(usuario, resposta["token"], resposta["expira_em"])
         except ConexaoBackendError:
             messagebox.showerror(
-                "Central Visconde",
+                "ViscondeApp",
                 "Não consegui falar com o servidor de contas. Verifique sua internet e tente de novo.",
             )
             return
         except ErroAutenticacao as erro:
-            messagebox.showerror("Central Visconde", str(erro))
+            messagebox.showerror("ViscondeApp", str(erro))
             return
 
         self.autenticado = True
@@ -593,19 +593,19 @@ class _JanelaAutenticacao:
         senha = self.campo_nova_senha.get()
 
         if not usuario or not senha:
-            messagebox.showwarning("Central Visconde", "Preencha usuário e senha.")
+            messagebox.showwarning("ViscondeApp", "Preencha usuário e senha.")
             return
 
         try:
             resposta = signup(usuario, senha)
         except ConexaoBackendError:
             messagebox.showerror(
-                "Central Visconde",
+                "ViscondeApp",
                 "Não consegui falar com o servidor de contas. Verifique sua internet e tente de novo.",
             )
             return
         except ErroAutenticacao as erro:
-            messagebox.showerror("Central Visconde", str(erro))
+            messagebox.showerror("ViscondeApp", str(erro))
             return
 
         self.token = resposta["token"]
@@ -644,7 +644,7 @@ class _JanelaAutenticacao:
         senha = self.campo_ogea_senha.get()
 
         if not usuario or not senha:
-            messagebox.showwarning("Central Visconde", "Preencha usuário e senha da OGEA.")
+            messagebox.showwarning("ViscondeApp", "Preencha usuário e senha da OGEA.")
             return
 
         self.plataformas["OGEA"] = {
@@ -687,7 +687,7 @@ class _JanelaAutenticacao:
         senha = self.campo_mobyan_senha.get()
 
         if not url or not usuario or not senha:
-            messagebox.showwarning("Central Visconde", "Preencha URL, usuário e senha da Mobyan.")
+            messagebox.showwarning("ViscondeApp", "Preencha URL, usuário e senha da Mobyan.")
             return
 
         self.plataformas["MOBYAN"] = {
@@ -718,12 +718,12 @@ class _JanelaAutenticacao:
             salvar_sessao_local(self.usuario, self.token, self.expira_em)
         except ConexaoBackendError:
             messagebox.showerror(
-                "Central Visconde",
+                "ViscondeApp",
                 "Não consegui falar com o servidor de contas. Verifique sua internet e tente de novo.",
             )
             return
         except ErroAutenticacao as erro:
-            messagebox.showerror("Central Visconde", str(erro))
+            messagebox.showerror("ViscondeApp", str(erro))
             return
 
         self.autenticado = True

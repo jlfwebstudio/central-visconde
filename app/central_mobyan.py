@@ -60,7 +60,7 @@ ARQUIVO_ICONE_ICO = RECURSOS_DIR / "assets" / "logo_visconde.ico"
 
 
 def configurar_identidade_windows():
-    """Mantém a janela agrupada no atalho premium da Central Visconde."""
+    """Mantém a janela agrupada no atalho premium do ViscondeApp."""
     if os.name != "nt":
         return
     try:
@@ -116,26 +116,32 @@ def abrir_caminho(caminho):
         subprocess.Popen(["xdg-open", str(caminho)])
 
 
-COR_FUNDO = "#080808"
-COR_FUNDO_2 = "#101010"
-COR_CARD = "#171717"
-COR_CARD_HOVER = "#222222"
-COR_BORDA = "#584A18"
-COR_DOURADO = "#F4C430"
-COR_DOURADO_HOVER = "#D8AA18"
-COR_DOURADO_ESCURO = "#9B7910"
-COR_BRANCO = "#F5F5F5"
-COR_TEXTO_SECUNDARIO = "#CFCFCF"
-COR_TEXTO_FRACO = "#8E8E8E"
-COR_VERDE = "#2EAD68"
-COR_VERDE_HOVER = "#248A54"
-COR_VERMELHO = "#D14949"
-COR_VERMELHO_HOVER = "#AA3939"
-COR_AZUL = "#3278C8"
-COR_AZUL_HOVER = "#275FA0"
-COR_LARANJA = "#D88A24"
-COR_LARANJA_HOVER = "#B36F19"
-COR_CINZA = "#5B5B5B"
+from estilo_visconde import (
+    ALTURA_CARD_CHEIO,
+    ALTURA_CARD_PAR,
+    COR_AZUL,
+    COR_AZUL_HOVER,
+    COR_BORDA,
+    COR_BRANCO,
+    COR_CARD,
+    COR_CARD_HOVER,
+    COR_CINZA,
+    COR_DOURADO,
+    COR_DOURADO_ESCURO,
+    COR_DOURADO_HOVER,
+    COR_FUNDO,
+    COR_FUNDO_2,
+    COR_LARANJA,
+    COR_LARANJA_HOVER,
+    COR_TEXTO_FRACO,
+    COR_TEXTO_SECUNDARIO,
+    COR_VERDE,
+    COR_VERDE_HOVER,
+    COR_VERMELHO,
+    COR_VERMELHO_HOVER,
+    LARGURA_CARD_CHEIO,
+    LARGURA_CARD_PAR,
+)
 
 
 class NavButton(tk.Frame):
@@ -407,7 +413,7 @@ class MetricCard(tk.Frame):
 class CentralVisconde:
     def __init__(self, root):
         self.root = root
-        self.root.title("Central Visconde")
+        self.root.title("ViscondeApp")
         configurar_icone_janela(self.root)
         largura_tela = self.root.winfo_screenwidth()
         altura_tela = self.root.winfo_screenheight()
@@ -487,7 +493,7 @@ class CentralVisconde:
             ("inicio", "Painel"),
             ("operacao", "Operação"),
             ("roteiros", "Roteiros"),
-            ("ferramentas", "Abono OGEA"),
+            ("ferramentas", "Abonos"),
         ]
         for chave, texto in itens:
             botao = NavButton(self.sidebar, texto, lambda c=chave: self.mostrar_pagina(c))
@@ -498,7 +504,7 @@ class CentralVisconde:
         rodape.pack(side="bottom", fill="x", padx=18, pady=18)
         tk.Label(
             rodape,
-            text="Central Visconde",
+            text="ViscondeApp",
             bg=COR_FUNDO,
             fg=COR_DOURADO,
             font=("Arial", 10, "bold"),
@@ -616,7 +622,7 @@ class CentralVisconde:
         scroll = tk.Scrollbar(log_frame, command=self.log_text.yview)
         scroll.pack(side="right", fill="y")
         self.log_text.config(yscrollcommand=scroll.set)
-        self.escrever_log("Central Visconde iniciada.\n")
+        self.escrever_log("ViscondeApp iniciado.\n")
         self.escrever_log("Escolha uma área no menu lateral.\n")
 
     def nova_pagina(self, chave):
@@ -705,23 +711,23 @@ class CentralVisconde:
         b1 = self.registrar_action(ActionCard(
             acoes,
             "Gerar Pendências",
-            "Baixa o relatório da Mobyan, trata as pendências e gera as imagens por prestador.",
+            "Busca as ordens de serviço pendentes na Mobyan e prepara tudo pra envio aos prestadores.",
             self.gerar_pendencias,
             COR_AZUL,
             COR_AZUL_HOVER,
-            largura=390,
-            altura=125,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
         ))
         b1.grid(row=0, column=0, padx=(0, 8), sticky="ew")
         b2 = self.registrar_action(ActionCard(
             acoes,
             "Enviar WhatsApp",
-            "Envia as imagens e o modelo de mensagem selecionado para as bases marcadas.",
+            "Envia a cobrança do dia pelos prestadores selecionados.",
             self.enviar_whatsapp,
             COR_VERDE,
             COR_VERDE_HOVER,
-            largura=390,
-            altura=125,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
         ))
         b2.grid(row=0, column=1, padx=(8, 0), sticky="ew")
         acoes.grid_columnconfigure(0, weight=1)
@@ -750,23 +756,23 @@ class CentralVisconde:
         b1 = self.registrar_action(ActionCard(
             acoes,
             "Gerar Roteirização",
-            "Baixa os relatórios atuais da Mobyan e OGEA e distribui as OSs pelos técnicos.",
+            "Organiza as ordens de serviço da Mobyan e OGEA em rotas por técnico.",
             self.gerar_roteirizacao,
             COR_DOURADO,
             COR_DOURADO_HOVER,
-            largura=390,
-            altura=125,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
         ))
         b1.grid(row=0, column=0, padx=(0, 8), sticky="ew")
         b2 = self.registrar_action(ActionCard(
             acoes,
             "Gerar Roteiros PDF",
-            "Gera as OSs, ignora falhas individuais da Mobyan e une tudo em um roteiro por técnico.",
+            "Monta o roteiro em PDF de cada técnico, pronto pra imprimir.",
             self.gerar_pdfs,
             COR_LARANJA,
             COR_LARANJA_HOVER,
-            largura=390,
-            altura=125,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
         ))
         b2.grid(row=0, column=1, padx=(8, 0), sticky="ew")
         acoes.grid_columnconfigure(0, weight=1)
@@ -794,12 +800,12 @@ class CentralVisconde:
         b3 = ActionCard(
             gestao_rotas_linha,
             "Abrir Gestão Inteligente de Rotas",
-            "Resolva bairros sem rota, crie aliases, edite regras e consulte o histórico sem abrir o Excel.",
+            "Ajuste rotas, técnicos e regras de roteirização num só lugar.",
             self.abrir_gestao_rotas,
             COR_DOURADO,
             COR_DOURADO_HOVER,
-            largura=520,
-            altura=100,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
         )
         b3.grid(row=0, column=0, padx=(0, 8), sticky="ew")
         b4 = ActionCard(
@@ -809,11 +815,11 @@ class CentralVisconde:
             self.abrir_gestao_tecnicos,
             COR_LARANJA,
             COR_LARANJA_HOVER,
-            largura=260,
-            altura=100,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
         )
-        b4.grid(row=0, column=1, sticky="ew")
-        gestao_rotas_linha.grid_columnconfigure(0, weight=2)
+        b4.grid(row=0, column=1, padx=(8, 0), sticky="ew")
+        gestao_rotas_linha.grid_columnconfigure(0, weight=1)
         gestao_rotas_linha.grid_columnconfigure(1, weight=1)
 
     def criar_pagina_ferramentas(self):
@@ -822,12 +828,12 @@ class CentralVisconde:
         b = self.registrar_action(ActionCard(
             pagina,
             "Selecionar relatório e analisar",
-            "Filtra a Data Limite de hoje e procura em todos os campos indícios de abertura aos sábados.",
+            "Analisa o relatório da OGEA e aponta quais OSs têm direito a abono.",
             self.analisar_abonos,
             COR_VERDE,
             COR_VERDE_HOVER,
-            largura=790,
-            altura=92,
+            largura=LARGURA_CARD_CHEIO,
+            altura=ALTURA_CARD_CHEIO,
         ))
         b.pack(fill="x")
 
@@ -911,7 +917,7 @@ class CentralVisconde:
             "inicio": ("Painel", "Panorama das OSs vencendo hoje, desconsiderando envios de bobina."),
             "operacao": ("Operação", "Geração, revisão e comunicação das pendências operacionais."),
             "roteiros": ("Roteiros", "Roteirização, ajuste de rotas e geração dos PDFs por técnico."),
-            "ferramentas": ("Abono OGEA", "Analista de abonos OGEA e acesso a arquivos e logs da Central."),
+            "ferramentas": ("Abonos", "Analista de abonos OGEA e acesso a arquivos e logs do sistema."),
         }
         for nome, pagina in self.paginas.items():
             if nome == chave:
@@ -1162,7 +1168,7 @@ class CentralVisconde:
                     self.escrever_log("\n" + "=" * 70 + "\n")
                     self.escrever_log(conteudo + "\n")
                     self.definir_status(conteudo, COR_VERDE)
-                    self.notificar("Central Visconde", conteudo)
+                    self.notificar("ViscondeApp", conteudo)
                     self.liberar_botoes()
                     self.atualizar_resumos()
                     if acao_concluida == "Gerar Roteirização":
@@ -1172,7 +1178,7 @@ class CentralVisconde:
                     self.escrever_log("\n" + "=" * 70 + "\n")
                     self.escrever_log(conteudo + "\n")
                     self.definir_status("erro na automação", COR_VERMELHO)
-                    self.notificar("Central Visconde", "A automação terminou com erro.")
+                    self.notificar("ViscondeApp", "A automação terminou com erro.")
                     self.liberar_botoes()
                     self.atualizar_resumos()
         except queue.Empty:
@@ -1386,8 +1392,8 @@ class CentralVisconde:
                 and self.janela_gestao_rotas.win.winfo_exists()
             ):
                 self.janela_gestao_rotas.recarregar_tudo()
-                if aba_inicial == "Técnicos":
-                    self.janela_gestao_rotas.notebook.select(self.janela_gestao_rotas.tab_tecnicos)
+                if aba_inicial:
+                    self.janela_gestao_rotas.barra_abas.selecionar(aba_inicial)
                 self.janela_gestao_rotas.win.deiconify()
                 self.janela_gestao_rotas.win.lift()
                 self.janela_gestao_rotas.win.focus_force()
@@ -1613,7 +1619,7 @@ def instalar_chromium_com_progresso(root, ao_concluir):
     permite diagnosticar sem depender de descrever o erro por texto."""
     configurar_icone_janela(root)
     janela = tk.Toplevel(root)
-    janela.title("Central Visconde")
+    janela.title("ViscondeApp")
     janela.configure(bg=COR_FUNDO)
     janela.geometry("440x150")
     janela.resizable(False, False)
@@ -1712,7 +1718,7 @@ def avisar_atualizacao_disponivel(root, info):
     baixa em segundo plano e pede pra fechar o app e rodar o instalador —
     não se autossubstitui em silêncio (ver Fase 4 do plano)."""
     versao_nova = info.get("versao", "?")
-    mensagem = f"Uma nova versão da Central Visconde está disponível ({versao_nova})."
+    mensagem = f"Uma nova versão do ViscondeApp está disponível ({versao_nova})."
     if info.get("notas"):
         mensagem += f"\n\n{info['notas']}"
     mensagem += "\n\nDeseja baixar agora?"
@@ -1725,12 +1731,12 @@ def avisar_atualizacao_disponivel(root, info):
 
     def finalizar(erro):
         if erro:
-            messagebox.showerror("Central Visconde", f"Não consegui baixar a atualização:\n{erro}")
+            messagebox.showerror("ViscondeApp", f"Não consegui baixar a atualização:\n{erro}")
             return
         messagebox.showinfo(
             "Atualização baixada",
             f"A atualização foi baixada em:\n{destino}\n\n"
-            "Feche a Central Visconde e rode o instalador baixado pra concluir.",
+            "Feche o ViscondeApp e rode o instalador baixado pra concluir.",
         )
         try:
             abrir_caminho(destino.parent)
@@ -1786,7 +1792,7 @@ def main():
             root.deiconify()
             if erro:
                 messagebox.showerror(
-                    "Central Visconde",
+                    "ViscondeApp",
                     f"Não consegui preparar o navegador da automação:\n{erro}\n\n"
                     "Feche e abra o app de novo para tentar mais uma vez.",
                 )

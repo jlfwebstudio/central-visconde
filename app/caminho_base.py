@@ -1,4 +1,4 @@
-"""Resolve os caminhos-base usados por todos os scripts da Central Visconde.
+"""Resolve os caminhos-base usados por todos os scripts do ViscondeApp.
 
 Rodando a partir do código-fonte (`.venv/bin/python app/algum_script.py`),
 BASE_DIR e RECURSOS_DIR são idênticos e iguais à raiz do repositório — exatamente
@@ -23,6 +23,10 @@ _RAIZ_REPO = Path(__file__).resolve().parent.parent
 FROZEN = getattr(sys, "frozen", False)
 
 if FROZEN:
+    # Nome da pasta mantido igual ao já publicado mesmo após o rebrand pra
+    # "ViscondeApp" — trocar isso faria toda instalação já em uso "perder" seus
+    # dados (login, credenciais, regras, sessão do WhatsApp) na próxima
+    # atualização, já que o app abriria olhando pra uma pasta nova e vazia.
     if sys.platform == "darwin":
         BASE_DIR = Path.home() / "Library" / "Application Support" / "Central Visconde"
     elif sys.platform == "win32":

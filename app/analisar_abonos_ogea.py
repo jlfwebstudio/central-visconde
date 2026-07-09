@@ -630,7 +630,7 @@ def formatar_tabela(ws, linha_cabecalho, total_linhas, total_colunas):
 
 def adicionar_aba_dados(wb, nome, df, subtitulo):
     ws = wb.create_sheet(nome)
-    estilizar_titulo(ws, f"Central Visconde | {nome}", subtitulo)
+    estilizar_titulo(ws, f"ViscondeApp | {nome}", subtitulo)
     linha_cabecalho = 4
 
     for coluna_idx, coluna in enumerate(COLUNAS_SAIDA, start=1):
@@ -742,7 +742,7 @@ def montar_aba_painel(ws, resultado, caminho_entrada, hoje, avisos, col_data, co
     """
     estilizar_titulo(
         ws,
-        "Central Visconde | Analista de Abonos OGEA",
+        "ViscondeApp | Analista de Abonos OGEA",
         "Visão rápida para o dia a dia: o que ABONAR, o que ATENDER e o que REVISAR manualmente.",
     )
 
@@ -896,7 +896,7 @@ def criar_planilha(resultado, caminho_entrada, hoje, avisos, col_data, col_os):
     regras_ws = wb.create_sheet("Regras")
     estilizar_titulo(
         regras_ws,
-        "Central Visconde | Regras do Analista",
+        "ViscondeApp | Regras do Analista",
         "Esta aba documenta a lógica da primeira versão. As validações manuais serão usadas para aprimorar as próximas versões.",
     )
     regras_dados = [
@@ -924,7 +924,7 @@ def salvar_log(caminho_entrada, resultado, avisos, caminho_saida):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     caminho_log = PASTA_LOGS / f"analise_abonos_{timestamp}.txt"
     linhas = [
-        "CENTRAL VISCONDE - ANALISTA DE ABONOS OGEA",
+        "VISCONDEAPP - ANALISTA DE ABONOS OGEA",
         f"Executado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
         f"Arquivo: {caminho_entrada}",
         f"Saída: {caminho_saida}",
@@ -946,7 +946,7 @@ def executar(caminho_entrada, abrir_resultado=True):
         raise FileNotFoundError(f"Arquivo não encontrado: {caminho_entrada}")
 
     print("=" * 70)
-    print("CENTRAL VISCONDE | ANALISTA DE ABONOS OGEA")
+    print("VISCONDEAPP | ANALISTA DE ABONOS OGEA")
     print("=" * 70)
     print(f"Arquivo: {caminho_entrada}")
 

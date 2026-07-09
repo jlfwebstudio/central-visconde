@@ -6,7 +6,7 @@ from .routers import admin, auth, conta, versao
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Central Visconde - Contas")
+app = FastAPI(title="ViscondeApp - Contas")
 
 app.include_router(auth.router)
 app.include_router(conta.router)
