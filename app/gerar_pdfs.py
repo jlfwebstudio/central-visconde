@@ -818,53 +818,51 @@ def capturar_sessao_mobyan(page, contexto):
         re.I,
     )
 
-    textos = []
+    def coletar_textos():
+        textos = []
 
-    for pagina in contexto.pages:
-        textos.append(str(pagina.url or ""))
+        for pagina in contexto.pages:
+            textos.append(str(pagina.url or ""))
 
-        try:
-            textos.append(pagina.content())
-        except Exception:
-            pass
+            try:
+                textos.append(pagina.content())
+            except Exception:
+                pass
 
-        for frame in pagina.frames:
-            textos.append(str(frame.url or ""))
+            for frame in pagina.frames:
+                textos.append(str(frame.url or ""))
+
+                try:
+                    textos.append(frame.content())
+                except Exception:
+                    pass
+
+        return textos
 
     sessao = ""
     usuario_relatorio = ""
 
-    for texto in textos:
-        if not sessao:
-            match = padrao_sessao.search(texto)
-            if match:
-                sessao = match.group(1)
+    # Em alguns carregamentos (principalmente máquinas/redes mais lentas) a
+    # sessão e/ou o link do relatório só aparecem depois que a tela inicial
+    # termina de montar todos os seus frames — por isso os dois são
+    # reavaliados juntos dentro do mesmo laço de espera, em vez de tentar
+    # capturar o usuário do relatório uma única vez antes do retry.
+    limite = time.time() + 30
 
-        if not usuario_relatorio:
-            match = padrao_usuario_relatorio.search(texto)
-            if match:
-                usuario_relatorio = match.group(1)
-
-    if not sessao:
-        # Em alguns carregamentos a sessão aparece somente depois que a tela
-        # inicial termina de montar seus frames.
-        limite = time.time() + 30
-
-        while time.time() < limite and not sessao:
-            for pagina in contexto.pages:
-                for candidato in [pagina.url] + [
-                    frame.url for frame in pagina.frames
-                ]:
-                    match = padrao_sessao.search(str(candidato or ""))
-                    if match:
-                        sessao = match.group(1)
-                        break
-
-                if sessao:
-                    break
-
+    while time.time() < limite and (not sessao or not usuario_relatorio):
+        for texto in coletar_textos():
             if not sessao:
-                page.wait_for_timeout(1000)
+                match = padrao_sessao.search(texto)
+                if match:
+                    sessao = match.group(1)
+
+            if not usuario_relatorio:
+                match = padrao_usuario_relatorio.search(texto)
+                if match:
+                    usuario_relatorio = match.group(1)
+
+        if not sessao or not usuario_relatorio:
+            page.wait_for_timeout(1000)
 
     if not usuario_relatorio:
         usuario_relatorio = MOBYAN_RELATORIO_USER
