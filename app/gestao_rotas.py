@@ -815,7 +815,7 @@ class GestaoRotasWindow:
         self.combo_sugestao.bind("<<ComboboxSelected>>", self._sugestao_mudou)
 
         self._label(direita, "Técnico responsável").pack(fill="x", padx=16)
-        self.combo_tecnico = ttk.Combobox(direita, state="normal", style="Visconde.TCombobox")
+        self.combo_tecnico = ttk.Combobox(direita, state="readonly", style="Visconde.TCombobox")
         self.combo_tecnico.pack(fill="x", padx=16, pady=(3, 12))
 
         self.btn_salvar_alias = self._botao(
@@ -1287,9 +1287,8 @@ class GestaoRotasWindow:
             tk.Label(frame, text=nome, bg=COR_FUNDO, fg=COR_TEXTO_SECUNDARIO, font=("Arial", 9)).pack(fill="x", pady=(6, 2))
             var = tk.StringVar(value=str(valores.get(nome, "") or ""))
             vars_[nome] = var
-            if tipo in ("combo", "combo_editavel"):
-                estado = "readonly" if tipo == "combo" else "normal"
-                widget = ttk.Combobox(frame, textvariable=var, values=opcoes, state=estado, style="Visconde.TCombobox")
+            if tipo == "combo":
+                widget = ttk.Combobox(frame, textvariable=var, values=opcoes, state="readonly", style="Visconde.TCombobox")
             else:
                 widget = tk.Entry(frame, textvariable=var, bg="#1B1B1B", fg=COR_BRANCO, insertbackground=COR_DOURADO, relief="flat")
             widget.pack(fill="x", ipady=5)
@@ -1313,7 +1312,7 @@ class GestaoRotasWindow:
         campos = [
             ("Ativo", "combo", ["Sim", "Não"]),
             ("Prioridade", "text", None),
-            ("Técnico", "combo_editavel", self.repo.tecnicos_ativos()),
+            ("Técnico", "combo", self.repo.tecnicos_ativos()),
             ("Tipo de Regra", "combo", ["Cidade + bairro", "Cidade inteira"]),
             ("Cidade", "text", None),
             ("Bairro / Localidade Normalizada", "text", None),
@@ -1321,6 +1320,13 @@ class GestaoRotasWindow:
             ("Regra Original", "text", None),
             ("Observação", "text", None),
         ]
+        if not self.repo.tecnicos_ativos():
+            messagebox.showwarning(
+                "Regra de roteirização",
+                "Cadastre pelo menos um técnico na aba Técnicos antes de criar uma regra.",
+                parent=self.win,
+            )
+            return
         valores = {nome: registro.get(nome, "") for nome, _, _ in campos}
         valores.setdefault("Ativo", "Sim")
         valores.setdefault("Prioridade", "1")
@@ -1337,6 +1343,7 @@ class GestaoRotasWindow:
             except ValueError:
                 raise ValueError("A prioridade deve ser um número inteiro.")
             self.repo.salvar_regra(dados, linha=linha)
+            self._reprocessar(False)
 
         self._form_dialog("Regra de roteirização", campos, valores, salvar)
 
@@ -1347,7 +1354,7 @@ class GestaoRotasWindow:
             ("Cidade", "text", None),
             ("Nome recebido", "text", None),
             ("Nome considerado", "text", None),
-            ("Técnico", "combo_editavel", [""] + self.repo.tecnicos_ativos()),
+            ("Técnico", "combo", [""] + self.repo.tecnicos_ativos()),
             ("Origem", "combo", ["AMBOS", "MOBYAN", "OGEA"]),
             ("Observação", "text", None),
         ]
@@ -1360,24 +1367,26 @@ class GestaoRotasWindow:
             if not dados["Cidade"] or not dados["Nome recebido"] or not dados["Nome considerado"]:
                 raise ValueError("Informe cidade, nome recebido e nome considerado.")
             self.repo.salvar_alias(dados, linha=linha)
+            self._reprocessar(False)
 
         self._form_dialog("Alias de bairro/localidade", campos, valores, salvar)
 
     def _dialog_tecnico(self, registro=None):
         registro = registro or {}
         campos = [
-            ("Ativo", "combo", ["Sim", "Não"]),
             ("Técnico", "text", None),
             ("Observação", "text", None),
         ]
         valores = {nome: registro.get(nome, "") for nome, _, _ in campos}
-        valores.setdefault("Ativo", "Sim")
         linha = registro.get("_linha")
+        ativo_atual = registro.get("Ativo") or "Sim"
 
         def salvar(dados):
             if not dados["Técnico"]:
                 raise ValueError("Informe o nome do técnico.")
+            dados["Ativo"] = ativo_atual
             self.repo.salvar_tecnico(dados, linha=linha)
+            self._reprocessar(False)
 
         self._form_dialog("Técnico", campos, valores, salvar)
 
@@ -1421,6 +1430,7 @@ class GestaoRotasWindow:
         try:
             self.repo.alternar_ativo(aba, int(sel[0]))
             self.recarregar_tudo()
+            self._reprocessar(False)
         except Exception as erro:
             messagebox.showerror(aba, f"Não consegui alterar o status:\n\n{erro}", parent=self.win)
 

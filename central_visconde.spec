@@ -78,7 +78,7 @@ if sys.platform == "darwin":
         # perdendo permissões concedidas em máquinas que já rodam o app.
         bundle_identifier="com.centralvisconde.app",
         info_plist={
-            "CFBundleShortVersionString": "1.1.0",
+            "CFBundleShortVersionString": "1.2.0",
             "LSMinimumSystemVersion": "11.0",
             "NSHighResolutionCapable": True,
         },

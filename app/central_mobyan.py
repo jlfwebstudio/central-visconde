@@ -27,6 +27,11 @@ except Exception:
     abrir_gestao_rotas = None
     obter_resumo_rotas = None
 
+try:
+    from configurar_whatsapp import abrir_configurar_whatsapp
+except Exception:
+    abrir_configurar_whatsapp = None
+
 from autenticacao import (
     baixar_atualizacao,
     carregar_sessao_local,
@@ -427,6 +432,7 @@ class CentralVisconde:
         self.log_queue = queue.Queue()
         self.acao_atual = None
         self.janela_gestao_rotas = None
+        self.janela_configurar_whatsapp = None
         self.botoes_processo = []
         self.paginas = {}
         self.nav_botoes = {}
@@ -492,6 +498,7 @@ class CentralVisconde:
         itens = [
             ("inicio", "Painel"),
             ("operacao", "Operação"),
+            ("whatsapp", "WhatsApp"),
             ("roteiros", "Roteiros"),
             ("ferramentas", "Abonos"),
         ]
@@ -565,6 +572,7 @@ class CentralVisconde:
 
         self.criar_pagina_inicio()
         self.criar_pagina_operacao()
+        self.criar_pagina_whatsapp()
         self.criar_pagina_roteiros()
         self.criar_pagina_ferramentas()
 
@@ -715,11 +723,30 @@ class CentralVisconde:
             self.gerar_pendencias,
             COR_AZUL,
             COR_AZUL_HOVER,
-            largura=LARGURA_CARD_PAR,
-            altura=ALTURA_CARD_PAR,
+            largura=LARGURA_CARD_CHEIO,
+            altura=ALTURA_CARD_CHEIO,
         ))
-        b1.grid(row=0, column=0, padx=(0, 8), sticky="ew")
-        b2 = self.registrar_action(ActionCard(
+        b1.pack(fill="x")
+
+        self.criar_atalhos(
+            pagina,
+            [
+                ("Abrir\nPendências", self.abrir_planilha),
+                ("Atualizar\nResumo", self.atualizar_resumos),
+            ],
+        ).pack(anchor="w", pady=(8, 0))
+
+        self.adicionar_painel_info(
+            pagina,
+            "Fluxo operacional",
+            "1. Gere as pendências.  2. Vá em WhatsApp pra revisar e enviar a cobrança do dia.",
+        )
+
+    def criar_pagina_whatsapp(self):
+        pagina = self.nova_pagina("whatsapp")
+        acoes = tk.Frame(pagina, bg=COR_FUNDO_2)
+        acoes.pack(fill="x", pady=(2, 14))
+        b1 = self.registrar_action(ActionCard(
             acoes,
             "Enviar WhatsApp",
             "Envia a cobrança do dia pelos prestadores selecionados.",
@@ -729,6 +756,17 @@ class CentralVisconde:
             largura=LARGURA_CARD_PAR,
             altura=ALTURA_CARD_PAR,
         ))
+        b1.grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        b2 = ActionCard(
+            acoes,
+            "Configurar Contatos",
+            "Cadastre o número de WhatsApp de cada base pra receber a cobrança.",
+            self.abrir_configurar_whatsapp,
+            COR_DOURADO,
+            COR_DOURADO_HOVER,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
+        )
         b2.grid(row=0, column=1, padx=(8, 0), sticky="ew")
         acoes.grid_columnconfigure(0, weight=1)
         acoes.grid_columnconfigure(1, weight=1)
@@ -736,17 +774,15 @@ class CentralVisconde:
         self.criar_atalhos(
             pagina,
             [
-                ("Abrir\nPendências", self.abrir_planilha),
                 ("Abrir\nAcompanhamento", self.abrir_acompanhamento),
                 ("Abrir\nImagens", self.abrir_pasta_imagens),
-                ("Atualizar\nResumo", self.atualizar_resumos),
             ],
         ).pack(anchor="w", pady=(4, 0))
 
         self.adicionar_painel_info(
             pagina,
-            "Fluxo operacional",
-            "1. Gere as pendências.  2. Revise Acompanhamento e Envios.  3. Marque somente as bases prontas.  4. Envie pelo WhatsApp.",
+            "Fluxo de envio",
+            "1. Cadastre o WhatsApp de cada base em Configurar Contatos (uma vez só).  2. Revise Acompanhamento e Envios.  3. Marque só as bases prontas.  4. Envie pelo WhatsApp.",
         )
 
     def criar_pagina_roteiros(self):
@@ -915,7 +951,8 @@ class CentralVisconde:
     def mostrar_pagina(self, chave):
         titulos = {
             "inicio": ("Painel", "Panorama das OSs vencendo hoje, desconsiderando envios de bobina."),
-            "operacao": ("Operação", "Geração, revisão e comunicação das pendências operacionais."),
+            "operacao": ("Operação", "Geração e revisão das pendências operacionais."),
+            "whatsapp": ("WhatsApp", "Envio das pendências e cadastro dos contatos de cada base."),
             "roteiros": ("Roteiros", "Roteirização, ajuste de rotas e geração dos PDFs por técnico."),
             "ferramentas": ("Abonos", "Analista de abonos OGEA e acesso a arquivos e logs do sistema."),
         }
@@ -1411,6 +1448,31 @@ class CentralVisconde:
 
     def abrir_gestao_tecnicos(self):
         self.abrir_gestao_rotas(aba_inicial="Técnicos")
+
+    def abrir_configurar_whatsapp(self):
+        if abrir_configurar_whatsapp is None:
+            messagebox.showerror(
+                "Configurar WhatsApp",
+                "O módulo de configuração de WhatsApp não foi encontrado. Reaplique a atualização da Central.",
+            )
+            return
+        try:
+            if (
+                self.janela_configurar_whatsapp is not None
+                and self.janela_configurar_whatsapp.win.winfo_exists()
+            ):
+                self.janela_configurar_whatsapp.recarregar()
+                self.janela_configurar_whatsapp.win.deiconify()
+                self.janela_configurar_whatsapp.win.lift()
+                self.janela_configurar_whatsapp.win.focus_force()
+                return
+
+            self.janela_configurar_whatsapp = abrir_configurar_whatsapp(self.root)
+            self.janela_configurar_whatsapp.win.lift()
+            self.janela_configurar_whatsapp.win.focus_force()
+        except Exception as erro:
+            self.janela_configurar_whatsapp = None
+            messagebox.showerror("Configurar WhatsApp", f"Não consegui abrir o módulo:\n\n{erro}")
 
     def abrir_base_rotas(self):
         if ARQUIVO_REGRAS_ROTEIRIZACAO.exists():
