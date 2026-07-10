@@ -585,6 +585,21 @@ class RepositorioRotas:
         )
         wb.save(self.caminho)
 
+    def excluir_regra(self, linha):
+        criar_backup_base("antes_excluir")
+        wb = load_workbook(self.caminho)
+        ws = wb["Regras"]
+        registro = _linha_dict(ws, linha)
+        ws.delete_rows(linha, 1)
+        chave = registro.get("Bairro / Localidade Normalizada") or registro.get("Cidade") or ""
+        _registrar_historico(
+            wb, "REGRA", "EXCLUIR",
+            registro.get("Origem", ""), registro.get("Cidade", ""), chave,
+            "", registro.get("Técnico", ""),
+            "Regra excluída pela Gestão de Rotas",
+        )
+        wb.save(self.caminho)
+
 
 def ler_pendencias():
     colunas = [
@@ -793,6 +808,11 @@ class GestaoRotasWindow:
         self.lbl_qtd_pendencias = tk.Label(barra, text="0 casos", bg=COR_FUNDO_2, fg=COR_DOURADO, font=("Arial", 10, "bold"))
         self.lbl_qtd_pendencias.pack(side="right")
 
+        tk.Label(
+            esquerda, text="Segure Ctrl (ou Cmd) e clique pra selecionar várias cidades pendentes de uma vez.",
+            bg=COR_FUNDO_2, fg=COR_TEXTO_FRACO, font=("Arial", 8), anchor="w",
+        ).pack(fill="x", pady=(0, 6))
+
         cols = ["Resultado", "Origem", "Cidade", "Bairro", "Qtd.", "Sugestão", "%"]
         cont, self.tree_pendencias = self._tree(esquerda, cols, [95, 75, 125, 190, 52, 190, 48])
         cont.pack(fill="both", expand=True)
@@ -855,7 +875,7 @@ class GestaoRotasWindow:
         botoes = tk.Frame(self.tab_regras, bg=COR_FUNDO_2)
         botoes.pack(fill="x", padx=12, pady=(0, 12))
         self._botao(botoes, "Editar selecionada", self.editar_regra, COR_AZUL, COR_BRANCO).pack(side="left")
-        self._botao(botoes, "Ativar / desativar", lambda: self.alternar_item("Regras"), COR_LARANJA, COR_BRANCO).pack(side="left", padx=8)
+        self._botao(botoes, "Excluir regra", self.excluir_regra_selecionada, COR_VERMELHO, COR_BRANCO).pack(side="left", padx=8)
 
     def _montar_aliases(self):
         topo = tk.Frame(self.tab_aliases, bg=COR_FUNDO_2)
@@ -992,8 +1012,30 @@ class GestaoRotasWindow:
         sel = self.tree_pendencias.selection()
         if not sel:
             return
-        row = self.pendencias.reset_index(drop=True).iloc[int(sel[0])]
-        self.pendencia_atual = row.to_dict()
+        linhas = self.pendencias.reset_index(drop=True)
+        selecionadas = [linhas.iloc[int(i)].to_dict() for i in sel]
+        self.pendencia_atual = selecionadas[0]
+        self.pendencias_atuais = selecionadas
+
+        if len(selecionadas) > 1:
+            cidades = sorted({p["Cidade"] for p in selecionadas if p["Cidade"]})
+            total_os = sum(int(p["Quantidade"]) for p in selecionadas)
+            self.combo_origem.set("AMBOS")
+            self.lbl_detalhes.config(
+                text=(
+                    f"{len(selecionadas)} pendências selecionadas em {len(cidades)} cidade(s) "
+                    f"({total_os} OS(s)).\n\n"
+                    + "\n".join(f"- {cidade}" for cidade in cidades)
+                    + "\n\nEscolha o técnico e clique em \"Cadastrar rota e gerar novamente\" "
+                    "pra atrelar a cidade inteira de cada uma pra ele, de uma vez só."
+                )
+            )
+            self.sugestoes_atual = []
+            self.combo_sugestao["values"] = []
+            self.combo_sugestao.set("")
+            return
+
+        row = selecionadas[0]
         self.combo_origem.set(str(row["Origem"] or "AMBOS"))
         self.lbl_detalhes.config(
             text=(
@@ -1030,6 +1072,11 @@ class GestaoRotasWindow:
         return self.pendencia_atual
 
     def salvar_alias_pendencia(self):
+        if len(getattr(self, "pendencias_atuais", []) or []) > 1:
+            messagebox.showwarning(
+                "Alias", "Selecione só uma pendência pra criar um alias.", parent=self.win
+            )
+            return
         pend = self._obter_pendencia()
         if not pend:
             return
@@ -1061,38 +1108,77 @@ class GestaoRotasWindow:
             messagebox.showerror("Alias", f"Não consegui salvar o alias:\n\n{erro}", parent=self.win)
 
     def salvar_rota_pendencia(self):
-        pend = self._obter_pendencia()
-        if not pend:
+        pendencias = getattr(self, "pendencias_atuais", None) or []
+        if not pendencias:
+            messagebox.showwarning("Gestão de Rotas", "Selecione ao menos uma pendência primeiro.", parent=self.win)
             return
         tecnico = self.combo_tecnico.get().strip()
         if not tecnico:
             messagebox.showwarning("Nova rota", "Selecione o técnico responsável.", parent=self.win)
             return
-        origem = self.combo_origem.get() or pend["Origem"] or "AMBOS"
-        registro = {
-            "Ativo": "Sim",
-            "Prioridade": 0 if origem != "AMBOS" else 1,
-            "Técnico": tecnico,
-            "Tipo de Regra": "Cidade + bairro",
-            "Cidade": pend["Cidade"],
-            "Bairro / Localidade Normalizada": pend["Bairro / Distrito"],
-            "Origem": origem,
-            "Regra Original": pend["Bairro / Distrito"],
-            "Observação": "Cadastrada pela Gestão Inteligente de Rotas",
-        }
-        if not messagebox.askyesno(
-            "Confirmar nova rota",
-            f"Cadastrar esta rota?\n\n{pend['Cidade']} + {pend['Bairro / Distrito']}\nTécnico: {tecnico}\nOrigem: {origem}\n\nDepois a Central gerará novamente o roteiro.",
-            parent=self.win,
-        ):
+        origem = self.combo_origem.get() or "AMBOS"
+
+        if len(pendencias) == 1:
+            pend = pendencias[0]
+            registros = [{
+                "Ativo": "Sim",
+                "Prioridade": 0 if origem != "AMBOS" else 1,
+                "Técnico": tecnico,
+                "Tipo de Regra": "Cidade + bairro",
+                "Cidade": pend["Cidade"],
+                "Bairro / Localidade Normalizada": pend["Bairro / Distrito"],
+                "Origem": origem,
+                "Regra Original": pend["Bairro / Distrito"],
+                "Observação": "Cadastrada pela Gestão Inteligente de Rotas",
+            }]
+            pergunta = (
+                f"Cadastrar esta rota?\n\n{pend['Cidade']} + {pend['Bairro / Distrito']}\n"
+                f"Técnico: {tecnico}\nOrigem: {origem}\n\nDepois a Central gerará novamente o roteiro."
+            )
+        else:
+            # Várias pendências selecionadas: atrela a cidade inteira de cada uma pro
+            # técnico escolhido, em vez de criar uma regra de bairro por pendência —
+            # evita repetir "Nova regra" bairro a bairro pra um técnico que cobre a
+            # cidade toda.
+            cidades = sorted({p["Cidade"] for p in pendencias if p["Cidade"]})
+            registros = [
+                {
+                    "Ativo": "Sim",
+                    "Prioridade": 0 if origem != "AMBOS" else 1,
+                    "Técnico": tecnico,
+                    "Tipo de Regra": "Cidade inteira",
+                    "Cidade": cidade,
+                    "Bairro / Localidade Normalizada": "",
+                    "Origem": origem,
+                    "Regra Original": "Cidade inteira",
+                    "Observação": "Cadastrada pela Gestão Inteligente de Rotas (seleção em lote)",
+                }
+                for cidade in cidades
+            ]
+            resumo = "\n".join(f"- {cidade} (cidade inteira)" for cidade in cidades)
+            pergunta = (
+                f"Cadastrar {len(cidades)} cidade(s) inteira(s) pra {tecnico}?\n\n{resumo}\n\n"
+                f"Origem: {origem}\n\nDepois a Central gerará novamente o roteiro."
+            )
+
+        if not messagebox.askyesno("Confirmar nova rota", pergunta, parent=self.win):
             return
         try:
-            self.repo.salvar_regra(registro)
+            for registro in registros:
+                self.repo.salvar_regra(registro)
             self._reprocessar(False)
         except Exception as erro:
-            messagebox.showerror("Nova rota", f"Não consegui salvar a rota:\n\n{erro}", parent=self.win)
+            messagebox.showerror("Nova rota", f"Não consegui salvar a(s) rota(s):\n\n{erro}", parent=self.win)
 
     def aplicar_temporariamente(self):
+        if len(getattr(self, "pendencias_atuais", []) or []) > 1:
+            messagebox.showwarning(
+                "Resolução temporária",
+                "Aplicação temporária funciona só com uma pendência selecionada. "
+                "Pra várias de uma vez, use \"Cadastrar rota e gerar novamente\".",
+                parent=self.win,
+            )
+            return
         pend = self._obter_pendencia()
         if not pend:
             return
@@ -1276,7 +1362,8 @@ class GestaoRotasWindow:
         janela = tk.Toplevel(self.win)
         janela.title(titulo)
         janela.configure(bg=COR_FUNDO)
-        janela.geometry("590x610")
+        janela.geometry("610x780")
+        janela.minsize(560, 480)
         janela.transient(self.win)
         janela.grab_set()
         vars_ = {}
@@ -1409,6 +1496,31 @@ class GestaoRotasWindow:
         registro = next((r for r in self.dados.get("Regras", []) if r.get("_linha") == linha), None)
         if registro:
             self._dialog_regra(registro)
+
+    def excluir_regra_selecionada(self):
+        sel = self.tree_regras.selection()
+        if not sel:
+            messagebox.showwarning("Regras", "Selecione uma regra.", parent=self.win)
+            return
+        linha = int(sel[0])
+        registro = next((r for r in self.dados.get("Regras", []) if r.get("_linha") == linha), None)
+        if not registro:
+            return
+        descricao = registro.get("Bairro / Localidade Normalizada") or "cidade inteira"
+        if not messagebox.askyesno(
+            "Excluir regra",
+            f"Excluir esta regra?\n\n{registro.get('Cidade', '')} + {descricao}\n"
+            f"Técnico: {registro.get('Técnico', '')}\n\n"
+            "Essa ação não pode ser desfeita (mas existe backup automático).",
+            parent=self.win,
+        ):
+            return
+        try:
+            self.repo.excluir_regra(linha)
+            self.recarregar_tudo()
+            self._reprocessar(False)
+        except Exception as erro:
+            messagebox.showerror("Regras", f"Não consegui excluir a regra:\n\n{erro}", parent=self.win)
 
     def editar_alias(self):
         sel = self.tree_aliases.selection()
