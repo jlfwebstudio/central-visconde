@@ -33,6 +33,7 @@ except Exception:
     abrir_configurar_whatsapp = None
 
 from autenticacao import (
+    abrir_configuracoes_conta,
     baixar_atualizacao,
     carregar_sessao_local,
     garantir_sessao_valida,
@@ -534,6 +535,17 @@ class CentralVisconde:
                 font=("Arial", 8),
             ).pack(anchor="w", pady=(10, 0))
 
+            link_config = tk.Label(
+                rodape,
+                text="Configurações da conta",
+                bg=COR_FUNDO,
+                fg=COR_DOURADO,
+                font=("Arial", 9, "underline"),
+                cursor="hand2",
+            )
+            link_config.pack(anchor="w", pady=(2, 0))
+            link_config.bind("<Button-1>", lambda _evento: self.abrir_configuracoes_conta())
+
             link_sair = tk.Label(
                 rodape,
                 text="Sair da conta",
@@ -1008,7 +1020,7 @@ class CentralVisconde:
         for botao in self.botoes_processo:
             botao.set_enabled(True)
 
-    def ler_envios_para_resumo(self):
+    def ler_envios_para_resumo(self, nome_aba_envios="Envios"):
         vazio = {
             "existe": False,
             "prontos": 0,
@@ -1019,8 +1031,8 @@ class CentralVisconde:
         if not ARQUIVO_PLANILHA.exists():
             return vazio
         try:
-            envios = pd.read_excel(ARQUIVO_PLANILHA, sheet_name="Envios", dtype=str, keep_default_na=False, na_filter=False)
-            pendencias = pd.read_excel(ARQUIVO_PLANILHA, sheet_name="Pendências", dtype=str, keep_default_na=False, na_filter=False)
+            envios = pd.read_excel(ARQUIVO_PLANILHA, sheet_name=nome_aba_envios, dtype=str, keep_default_na=False, na_filter=False)
+            pendencias = pd.read_excel(ARQUIVO_PLANILHA, sheet_name="Pendências Mobyan", dtype=str, keep_default_na=False, na_filter=False)
             try:
                 acompanhamento = pd.read_excel(ARQUIVO_PLANILHA, sheet_name="Acompanhamento", dtype=str, keep_default_na=False, na_filter=False)
             except Exception:
@@ -1028,12 +1040,17 @@ class CentralVisconde:
 
             for coluna in envios.columns:
                 envios[coluna] = envios[coluna].astype(str).str.strip()
-            if "Enviar" not in envios.columns:
-                envios["Enviar"] = ""
             if "Status Envio" not in envios.columns:
                 envios["Status Envio"] = ""
-            enviar_norm = envios["Enviar"].astype(str).str.strip().str.lower()
-            prontos = len(envios[(envios["Status Envio"] == "Pronto para envio") & enviar_norm.isin(["sim", "s", "yes", "y"])])
+            # "Envios Técnicos" não tem a coluna "Enviar" (o técnico entra na fila
+            # só por ter WhatsApp cadastrado — ver ler_tecnicos_whatsapp) — nesse
+            # caso não filtra por ela, só pelo Status Envio.
+            if "Enviar" in envios.columns:
+                enviar_norm = envios["Enviar"].astype(str).str.strip().str.lower()
+                filtro_enviar = enviar_norm.isin(["sim", "s", "yes", "y"])
+            else:
+                filtro_enviar = pd.Series([True] * len(envios), index=envios.index)
+            prontos = len(envios[(envios["Status Envio"] == "Pronto para envio") & filtro_enviar])
             sem_retorno = 0
             em_risco = 0
             if not acompanhamento.empty:
@@ -1086,7 +1103,7 @@ class CentralVisconde:
             return vazio
         try:
             df = pd.read_excel(
-                ARQUIVO_PLANILHA, sheet_name="Pendências", dtype=str,
+                ARQUIVO_PLANILHA, sheet_name="Pendências Mobyan", dtype=str,
                 keep_default_na=False, na_filter=False,
             )
         except Exception as erro:
@@ -1383,11 +1400,47 @@ class CentralVisconde:
         janela.wait_window()
         return escolha["valor"]
 
+    def escolher_destino_envio(self):
+        janela = tk.Toplevel(self.root)
+        janela.title("Destino do envio")
+        janela.geometry("580x390")
+        janela.resizable(False, False)
+        janela.configure(bg=COR_FUNDO)
+        janela.transient(self.root)
+        janela.grab_set()
+        escolha = {"valor": None}
+        janela.update_idletasks()
+        largura = 580
+        altura = 390
+        x = (janela.winfo_screenwidth() // 2) - (largura // 2)
+        y = (janela.winfo_screenheight() // 2) - (altura // 2)
+        janela.geometry(f"{largura}x{altura}+{x}+{y}")
+        container = tk.Frame(janela, bg=COR_FUNDO)
+        container.pack(fill="both", expand=True, padx=28, pady=24)
+        tk.Label(container, text="Para quem é esse envio?", font=("Arial", 19, "bold"), bg=COR_FUNDO, fg=COR_DOURADO).pack(pady=(4, 6))
+        tk.Label(container, text="Escolha se o envio vai para as bases (prestadores) ou direto para os técnicos da RS-SMART.", font=("Arial", 11), bg=COR_FUNDO, fg=COR_TEXTO_SECUNDARIO, wraplength=520, justify="center").pack(pady=(0, 20))
+
+        def selecionar(valor):
+            escolha["valor"] = valor
+            janela.destroy()
+
+        ActionCard(container, "Bases", "Cobrança do dia pelos prestadores cadastrados.", lambda: selecionar("bases"), COR_AZUL, COR_AZUL_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
+        ActionCard(container, "Técnicos RS-SMART", "Lembrete individual pras rotas de cada técnico.", lambda: selecionar("tecnicos"), COR_VERDE, COR_VERDE_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
+        SmallButton(container, "Cancelar", lambda: selecionar(None), largura=510).pack(fill="x", pady=(8, 0))
+        janela.wait_window()
+        return escolha["valor"]
+
     def enviar_whatsapp(self):
-        dados = self.ler_envios_para_resumo()
+        destino = self.escolher_destino_envio()
+        if destino is None:
+            return
+        nome_aba_envios = "Envios Técnicos" if destino == "tecnicos" else "Envios"
+        rotulo_unidade = "técnico(s)" if destino == "tecnicos" else "prestador(es)"
+        rotulo_ausencia = "nenhum técnico" if destino == "tecnicos" else "nenhuma base"
+        dados = self.ler_envios_para_resumo(nome_aba_envios)
         prontos = dados["prontos"]
         if prontos <= 0:
-            messagebox.showwarning("Nenhum envio pronto", "Não há nenhuma base com Enviar = Sim e Status Envio = Pronto para envio.")
+            messagebox.showwarning("Nenhum envio pronto", f"Não há {rotulo_ausencia} com Status Envio = Pronto para envio.")
             self.atualizar_resumos()
             return
         modelo = self.escolher_modelo_mensagem()
@@ -1396,15 +1449,15 @@ class CentralVisconde:
         nome_modelo = "Mensagem da Manhã" if modelo == "manha" else "Mensagem de Acompanhamento"
         resposta = messagebox.askyesno(
             "Confirmar envio",
-            f"Modelo selecionado: {nome_modelo}\n\nSerão enviados {prontos} prestador(es) por WhatsApp.\n\nDeseja continuar?",
+            f"Modelo selecionado: {nome_modelo}\n\nSerão enviados {prontos} {rotulo_unidade} por WhatsApp.\n\nDeseja continuar?",
         )
         if not resposta:
             return
         self.rodar_script(
             SCRIPT_ENVIAR_WHATSAPP,
             "Enviar Pendências WhatsApp",
-            "Envio das pendências para as bases concluído.",
-            env_extra={"MODELO_MENSAGEM": modelo},
+            f"Envio das pendências para {'os técnicos' if destino == 'tecnicos' else 'as bases'} concluído.",
+            env_extra={"MODELO_MENSAGEM": modelo, "DESTINO_ENVIO": destino},
         )
 
     def fechar_gestao_rotas(self):
@@ -1493,7 +1546,7 @@ class CentralVisconde:
             return None, "A planilha de pendências ainda não foi gerada."
         try:
             df = pd.read_excel(
-                ARQUIVO_PLANILHA, sheet_name="Pendências", dtype=str,
+                ARQUIVO_PLANILHA, sheet_name="Pendências Mobyan", dtype=str,
                 keep_default_na=False, na_filter=False,
             )
         except Exception as erro:
@@ -1602,6 +1655,16 @@ class CentralVisconde:
 
     def abrir_pasta_projeto(self):
         abrir_caminho(BASE_DIR)
+
+    def abrir_configuracoes_conta(self):
+        if self.processo_rodando:
+            messagebox.showwarning(
+                "Configurações da conta",
+                "Espere a automação em andamento terminar antes de editar as configurações da conta.",
+            )
+            return
+
+        abrir_configuracoes_conta(self.root, ao_salvar=self.atualizar_resumos)
 
     def sair_da_conta(self):
         if self.processo_rodando:

@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from datetime import datetime, date
 from pathlib import Path
 
@@ -16,6 +17,17 @@ from PIL import Image, ImageDraw, ImageFont
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 from caminho_base import BASE_DIR
+from baixar_relatorios_roteirizacao import baixar_relatorio_ogea
+from sla_bases import (
+    calcular_snapshot_diario,
+    registrar_historico,
+    calcular_ranking_sla,
+    calcular_detalhe_por_tecnico,
+    COLUNAS_RANKING,
+    COLUNAS_DETALHE_TECNICO,
+    LIMIAR_CRITICO_VENCIDAS,
+    LIMIAR_ATENCAO_VENCIDAS,
+)
 load_dotenv(BASE_DIR / ".env")
 
 MOBYAN_URL = os.getenv("MOBYAN_URL")
@@ -51,14 +63,33 @@ _PRESTADORES_RS_SMART_PADRAO = [
 MOBYAN_PRESTADORES = _lista_a_partir_do_env("MOBYAN_PRESTADORES", _PRESTADORES_RS_SMART_PADRAO)
 MOBYAN_ESTADO = os.getenv("MOBYAN_ESTADO", "RS").strip() or "RS"
 
+# Qual prestador é a "matriz" (técnicos próprios, não uma base terceirizada com
+# responsável próprio) — usado pra saber quais OSs entram na cobrança individual
+# por técnico (ver criar_dataframe_envios_tecnicos). Não fixamos "RS-SMART" no
+# código porque o app é multi-tenant; o default é só o primeiro prestador
+# configurado, que pra esta conta já é RS-SMART.
+MOBYAN_PRESTADOR_MATRIZ = os.getenv(
+    "MOBYAN_PRESTADOR_MATRIZ",
+    MOBYAN_PRESTADORES[0] if MOBYAN_PRESTADORES else ""
+).strip()
+
+# A OGEA é opcional aqui (nem toda conta usa as duas plataformas — ver cadastro
+# em autenticacao.py): sem usuário/senha configurados, a aba "Pendências OGEA"
+# simplesmente sai vazia em vez de travar a geração das pendências da Mobyan.
+OGEA_USUARIO = os.getenv("OGEA_USUARIO", "").strip()
+OGEA_SENHA = os.getenv("OGEA_SENHA", "").strip()
+OGEA_PRESTADOR = os.getenv("OGEA_PRESTADOR", "SMART TECNOLOGIA").strip() or "SMART TECNOLOGIA"
+
 PASTA_DOWNLOADS = BASE_DIR / "downloads" / "relatorios_completos"
 PASTA_PENDENCIAS = BASE_DIR / "outputs" / "pendencias_do_dia"
 PASTA_IMAGENS_PRESTADOR = BASE_DIR / "outputs" / "por_prestador_imagens"
+PASTA_IMAGENS_TECNICO = BASE_DIR / "outputs" / "por_tecnico_imagens"
 PASTA_PRESTADOR_ANTIGA = BASE_DIR / "outputs" / "por_prestador"
 PASTA_LOGS = BASE_DIR / "logs"
 
 ARQUIVO_BASE_JUSTIFICATIVAS = BASE_DIR / "bases" / "base_justificativas.xlsx"
 ARQUIVO_CONTATOS_PRESTADORES = BASE_DIR / "bases" / "contatos_prestadores.xlsx"
+ARQUIVO_REGRAS_ROTEIRIZACAO = BASE_DIR / "bases" / "regras_roteirizacao.xlsx"
 ARQUIVO_FINAL_PENDENCIAS = PASTA_PENDENCIAS / "pendencias_do_dia_atual.xlsx"
 PASTA_BACKUPS_PENDENCIAS = PASTA_PENDENCIAS / "backups"
 ARQUIVO_BACKUP_ULTIMO = PASTA_BACKUPS_PENDENCIAS / "pendencias_do_dia_backup_ultimo.xlsx"
@@ -441,6 +472,23 @@ def normalizar_chamado(valor):
     return texto
 
 
+def normalizar_texto(valor):
+    """Mesmo padrão usado em gestao_rotas.py/gerar_roteirizacao.py: decompõe
+    acentos, maiúsculas, colapsa pontuação/espaço — pra comparar o "Técnico" que
+    vem cru do relatório da Mobyan com o nome cadastrado em "Técnicos" sem
+    quebrar por acento/caixa/espaço diferente."""
+    if valor is None:
+        return ""
+    texto = str(valor).strip()
+    if texto.lower() in {"", "nan", "none", "null", "nat"}:
+        return ""
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    texto = texto.upper()
+    texto = re.sub(r"[^A-Z0-9]+", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
 def valor_vazio(valor):
     if pd.isna(valor):
         return True
@@ -472,6 +520,16 @@ def limpar_valor(valor):
         texto = texto[1:-1].strip()
 
     return texto
+
+
+def excluir_bobina(df):
+    """Mesmo critério já usado no Acompanhamento Operacional (ver
+    criar_dataframe_acompanhamento): OSs de bobina não impactam o controle de
+    SLA do dia. Usado pelo SLA por Base/Técnico e pela fila de técnico — as
+    Pendências/Envios da própria base continuam mostrando bobina normalmente."""
+    if df.empty or "Serviço" not in df.columns:
+        return df.copy()
+    return df[~df["Serviço"].fillna("").astype(str).str.upper().str.contains("BOBINA", na=False)].copy()
 
 
 def limpar_nome_arquivo(texto):
@@ -1161,7 +1219,8 @@ def limpar_pasta_excel_prestador_antiga():
             print(f"Aviso: não consegui apagar arquivo antigo por prestador {arquivo}. Erro: {erro}")
 
 
-def gerar_imagem_prestador(prestador, df_prestador):
+def gerar_imagem_prestador(prestador, df_prestador, pasta_saida=None):
+    pasta_saida = pasta_saida or PASTA_IMAGENS_PRESTADOR
     df_img = df_prestador[COLUNAS_IMAGEM].copy()
 
     total_largura_tabela = sum(LARGURAS_IMAGEM[coluna] for coluna in COLUNAS_IMAGEM)
@@ -1248,7 +1307,7 @@ def gerar_imagem_prestador(prestador, df_prestador):
         y += ALTURA_LINHA_IMAGEM
 
     nome_arquivo = limpar_nome_arquivo(prestador) + ".png"
-    caminho_saida = PASTA_IMAGENS_PRESTADOR / nome_arquivo
+    caminho_saida = pasta_saida / nome_arquivo
 
     imagem.save(caminho_saida, "PNG")
 
@@ -1299,6 +1358,49 @@ def gerar_imagens_por_prestador(df_pendencias):
 
     return imagens
 
+
+def gerar_imagens_por_tecnico(df_pendencias_matriz, tecnicos_whatsapp):
+    """Mesma ideia de gerar_imagens_por_prestador, mas agrupando por Técnico —
+    só pros técnicos cadastrados com WhatsApp (ver ler_tecnicos_whatsapp)."""
+    print("Gerando imagens por técnico...")
+
+    PASTA_IMAGENS_TECNICO.mkdir(parents=True, exist_ok=True)
+
+    if df_pendencias_matriz.empty or tecnicos_whatsapp.empty or "Técnico" not in df_pendencias_matriz.columns:
+        print("Nenhuma pendência da matriz ou nenhum técnico com WhatsApp cadastrado.")
+        return {}
+
+    for coluna in COLUNAS_IMAGEM:
+        if coluna not in df_pendencias_matriz.columns:
+            df_pendencias_matriz[coluna] = ""
+
+    imagens = {}
+    total = 0
+
+    # O relatório da Mobyan traz o nome completo do técnico (às vezes prefixado
+    # com "(TA)" pra terceirizado). Compara pelo "Nome no Sistema" (quando o
+    # técnico usa lá o nome de outra pessoa) ou pelo próprio nome cadastrado,
+    # por prefixo de palavras normalizado — ver tecnico_bate_com_termo.
+    for _, registro in tecnicos_whatsapp.iterrows():
+        tecnico = registro["Técnico"]
+        termo_busca = termo_busca_tecnico(registro)
+        mascara = df_pendencias_matriz["Técnico"].apply(
+            lambda v: tecnico_bate_com_termo(v, termo_busca)
+        )
+        df_tecnico = df_pendencias_matriz[mascara].copy()
+
+        if df_tecnico.empty:
+            continue
+
+        caminho = gerar_imagem_prestador(tecnico, df_tecnico, pasta_saida=PASTA_IMAGENS_TECNICO)
+        imagens[tecnico] = caminho
+
+        print(f"Imagem gerada: {caminho}")
+        total += 1
+
+    print(f"Total de imagens geradas por técnico: {total}")
+
+    return imagens
 
 
 def criar_aba_resumo(writer, df_pendencias, df_acompanhamento=None):
@@ -1404,7 +1506,7 @@ def criar_aba_resumo(writer, df_pendencias, df_acompanhamento=None):
     )
     top_cidade.to_excel(writer, index=False, sheet_name=sheet_name, startrow=12, startcol=5)
 
-def preparar_dataframe_final(df, hoje):
+def preparar_dataframe_final(df, hoje, marcar_falta_abonar=True):
     colunas_desejadas = [
         "Chamado",
         "Numero Referencia",
@@ -1445,14 +1547,15 @@ def preparar_dataframe_final(df, hoje):
         )
     )
 
-    for indice, linha in df.iterrows():
-        situacao = str(linha.get("SITUAÇÃO", "")).strip().upper()
-        justificativa = linha.get("Justificativa do Abono", "")
+    if marcar_falta_abonar:
+        for indice, linha in df.iterrows():
+            situacao = str(linha.get("SITUAÇÃO", "")).strip().upper()
+            justificativa = linha.get("Justificativa do Abono", "")
 
-        # A coluna "Justificativa do Abono" representa somente o que veio do sistema Mobyan.
-        # Se a OS está vencida e veio sem justificativa do sistema, ela precisa aparecer como FALTA ABONAR.
-        if situacao == "VENCIDA" and valor_vazio(justificativa):
-            df.at[indice, "Justificativa do Abono"] = "FALTA ABONAR"
+            # A coluna "Justificativa do Abono" representa somente o que veio do sistema Mobyan.
+            # Se a OS está vencida e veio sem justificativa do sistema, ela precisa aparecer como FALTA ABONAR.
+            if situacao == "VENCIDA" and valor_vazio(justificativa):
+                df.at[indice, "Justificativa do Abono"] = "FALTA ABONAR"
 
     df = df.sort_values(
         by="_DATA_LIMITE_FORMATADA",
@@ -1532,8 +1635,66 @@ def ler_contatos_prestadores():
     return df
 
 
+def ler_tecnicos_whatsapp():
+    """Lê a aba "Técnicos" de bases/regras_roteirizacao.xlsx direto (sem importar
+    gestao_rotas.py, que é módulo de GUI — mesmo padrão desacoplado de
+    ler_contatos_prestadores), filtrando só quem está Ativo e tem WhatsApp
+    cadastrado."""
+    colunas = ["Ativo", "Técnico", "WhatsApp", "Nome no Sistema", "Observação"]
 
-def criar_mensagem_envio(responsavel, prestador, total_pendencias, vencidas, vence_hoje):
+    if not ARQUIVO_REGRAS_ROTEIRIZACAO.exists():
+        return pd.DataFrame(columns=colunas)
+
+    try:
+        df = pd.read_excel(ARQUIVO_REGRAS_ROTEIRIZACAO, sheet_name="Técnicos", dtype=str)
+    except Exception as erro:
+        print(f"Não consegui ler o cadastro de técnicos. Erro: {erro}")
+        return pd.DataFrame(columns=colunas)
+
+    for coluna in colunas:
+        if coluna not in df.columns:
+            df[coluna] = ""
+
+    df = df[colunas].copy()
+
+    df["Ativo"] = df["Ativo"].fillna("").astype(str).str.strip()
+    df["Técnico"] = df["Técnico"].fillna("").astype(str).str.strip()
+    df["WhatsApp"] = df["WhatsApp"].fillna("").astype(str).str.replace(r"\D", "", regex=True)
+    df["Nome no Sistema"] = df["Nome no Sistema"].fillna("").astype(str).str.strip()
+    df["Observação"] = df["Observação"].fillna("").astype(str).str.strip()
+
+    df = df[
+        df["Ativo"].str.lower().isin(["sim", "s", "yes", "y", "true", "1"])
+        & (df["Técnico"] != "")
+        & (df["WhatsApp"] != "")
+    ].copy()
+
+    return df
+
+
+# Bloco de opções compartilhado pelas mensagens de base e de técnico (manhã e
+# acompanhamento) — evita 4 cópias do mesmo texto derivando com o tempo.
+BLOCO_OPCOES_RESPOSTA = (
+    "1 - Em rota / será atendida hoje\n"
+    "2 - Atendimento confirmado com horário\n"
+    "3 - Em atendimento\n"
+    "4 - Atendido, aguardando baixa no sistema\n"
+    "5 - Cliente indisponível\n"
+    "6 - Sem técnico\n"
+    "7 - Sem equipamento/material\n"
+    "8 - Vai atrasar\n"
+    "9 - Precisa abonar"
+)
+
+BLOCO_EXEMPLO_RESPOSTA = (
+    "Pode responder assim:\n"
+    "OS 123456 - opção 1\n"
+    "OS 123457 - opção 2, previsão 14h\n"
+    "OS 123458 - opção 8, previsão amanhã"
+)
+
+
+def criar_mensagem_envio(responsavel, prestador, total_pendencias, vencidas, vence_hoje, nivel_cobranca="NORMAL"):
     nome = responsavel.strip() if not valor_vazio(responsavel) else ""
 
     if nome:
@@ -1554,30 +1715,28 @@ def criar_mensagem_envio(responsavel, prestador, total_pendencias, vencidas, ven
 
     resumo = " e ".join(partes) if partes else f"{total_pendencias} pendente(s)"
 
+    aviso_critico = (
+        "\n\nAtenção: essa base está com pendências vencidas de forma recorrente "
+        "nos últimos dias. Precisamos de um retorno com plano de ação até o fim do "
+        "dia — isso está afetando diretamente nosso SLA contratual."
+        if nivel_cobranca == "CRÍTICO"
+        else ""
+    )
+
     mensagem = (
         f"{saudacao}\n\n"
         f"Segue pendências da base {prestador}.\n\n"
-        f"Temos {resumo}. Preciso do retorno operacional para evitar atraso no SLA.\n\n"
+        f"Temos {resumo}. Preciso do retorno operacional para evitar atraso no SLA."
+        f"{aviso_critico}\n\n"
         "Por favor, responda cada OS com uma das opções abaixo:\n"
-        "1 - Em rota / será atendida hoje\n"
-        "2 - Atendimento confirmado com horário\n"
-        "3 - Em atendimento\n"
-        "4 - Atendido, aguardando baixa no sistema\n"
-        "5 - Cliente indisponível\n"
-        "6 - Sem técnico\n"
-        "7 - Sem equipamento/material\n"
-        "8 - Vai atrasar\n"
-        "9 - Precisa abonar\n\n"
-        "Pode responder assim:\n"
-        "OS 123456 - opção 1\n"
-        "OS 123457 - opção 2, previsão 14h\n"
-        "OS 123458 - opção 8, previsão amanhã"
+        f"{BLOCO_OPCOES_RESPOSTA}\n\n"
+        f"{BLOCO_EXEMPLO_RESPOSTA}"
     )
 
     return mensagem
 
 
-def criar_mensagem_acompanhamento(responsavel, prestador, total_pendencias, vencidas, vence_hoje):
+def criar_mensagem_acompanhamento(responsavel, prestador, total_pendencias, vencidas, vence_hoje, nivel_cobranca="NORMAL"):
     nome = responsavel.strip() if not valor_vazio(responsavel) else ""
 
     if nome:
@@ -1598,27 +1757,78 @@ def criar_mensagem_acompanhamento(responsavel, prestador, total_pendencias, venc
 
     resumo = " e ".join(partes) if partes else f"{total_pendencias} pendente(s)"
 
+    aviso_critico = (
+        "\n\nAtenção: essa base está com pendências vencidas de forma recorrente "
+        "nos últimos dias. Precisamos de um retorno com plano de ação até o fim do "
+        "dia — isso está afetando diretamente nosso SLA contratual."
+        if nivel_cobranca == "CRÍTICO"
+        else ""
+    )
+
     mensagem = (
         f"{saudacao}\n\n"
         f"Segue atualização das pendências da base {prestador}.\n\n"
-        f"Ainda temos {resumo}.\n\n"
+        f"Ainda temos {resumo}.{aviso_critico}\n\n"
         "Me atualiza, por favor, quais OSs já estão controladas e quais têm risco de atraso.\n\n"
         "Use as opções abaixo para facilitar:\n"
-        "1 - Em rota / será atendida hoje\n"
-        "2 - Atendimento confirmado com horário\n"
-        "3 - Em atendimento\n"
-        "4 - Atendido, aguardando baixa no sistema\n"
-        "5 - Cliente indisponível\n"
-        "6 - Sem técnico\n"
-        "7 - Sem equipamento/material\n"
-        "8 - Vai atrasar\n"
-        "9 - Precisa abonar\n\n"
+        f"{BLOCO_OPCOES_RESPOSTA}\n\n"
         "Se tiver OS que vai atrasar, já me manda a previsão e o motivo."
     )
 
     return mensagem
 
-def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
+
+def criar_mensagem_tecnico_envio(tecnico, total_pendencias, vencidas, vence_hoje):
+    """Mensagem individual pro técnico (RS-SMART matriz) — bem mais simples que a
+    de base (sem menu de opções numeradas): só um aviso curto, já que a lista
+    completa vai na imagem anexada junto."""
+    nome = tecnico.strip() if not valor_vazio(tecnico) else ""
+    saudacao = f"Bom dia, {nome}!" if nome else "Bom dia!"
+
+    if total_pendencias <= 0:
+        return ""
+
+    partes = []
+
+    if vencidas > 0:
+        partes.append(f"{vencidas} vencida(s)")
+
+    if vence_hoje > 0:
+        partes.append(f"{vence_hoje} com prazo para hoje")
+
+    resumo = " e ".join(partes) if partes else f"{total_pendencias} pendente(s)"
+
+    mensagem = f"{saudacao}\n\nTemos {resumo} — segue a lista."
+
+    return mensagem
+
+
+def criar_mensagem_tecnico_acompanhamento(tecnico, total_pendencias, vencidas, vence_hoje):
+    nome = tecnico.strip() if not valor_vazio(tecnico) else ""
+    saudacao = f"Boa tarde, {nome}!" if nome else "Boa tarde!"
+
+    if total_pendencias <= 0:
+        return ""
+
+    partes = []
+
+    if vencidas > 0:
+        partes.append(f"{vencidas} vencida(s)")
+
+    if vence_hoje > 0:
+        partes.append(f"{vence_hoje} com prazo para hoje")
+
+    resumo = " e ".join(partes) if partes else f"{total_pendencias} pendente(s)"
+
+    mensagem = (
+        f"{saudacao}\n\n"
+        f"Ainda temos {resumo}, e não podemos perder. Tá tudo certo?"
+    )
+
+    return mensagem
+
+
+def criar_dataframe_envios(df_pendencias, imagens_por_prestador, df_ranking_sla=None):
     print("Criando fila de envios...")
 
     contatos = ler_contatos_prestadores()
@@ -1632,6 +1842,8 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
         "Total Pendências",
         "Vencidas",
         "Vence Hoje",
+        "Nível de Cobrança",
+        "Tendência",
         "Status Envio",
         "Mensagem",
         "Mensagem Manhã",
@@ -1642,6 +1854,14 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
     if contatos.empty:
         print("Nenhum contato encontrado para envio.")
         return pd.DataFrame(columns=colunas_envios)
+
+    # Ranking de SLA é calculado por Origem+Prestador; Envios/WhatsApp continua
+    # só-Mobyan por decisão explícita (ver buscar_pendencias_ogea), então o
+    # cruzamento aqui só olha as linhas de Origem MOBYAN.
+    if df_ranking_sla is not None and not df_ranking_sla.empty and "Origem" in df_ranking_sla.columns:
+        ranking_mobyan = df_ranking_sla[df_ranking_sla["Origem"] == "MOBYAN"].set_index("Prestador")
+    else:
+        ranking_mobyan = pd.DataFrame()
 
     linhas = []
 
@@ -1666,6 +1886,13 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
         vencidas = len(df_prestador[df_prestador["SITUAÇÃO"] == "VENCIDA"])
         vence_hoje = len(df_prestador[df_prestador["SITUAÇÃO"] == "VENCE HOJE"])
 
+        if prestador in ranking_mobyan.index:
+            nivel_cobranca = ranking_mobyan.loc[prestador, "Nível de Cobrança"]
+            tendencia = ranking_mobyan.loc[prestador, "Tendência"]
+        else:
+            nivel_cobranca = "NORMAL"
+            tendencia = "ESTÁVEL"
+
         caminho_imagem = imagens_por_prestador.get(prestador, "")
         caminho_imagem_texto = str(caminho_imagem) if caminho_imagem else ""
 
@@ -1688,7 +1915,8 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
                 prestador=prestador,
                 total_pendencias=total_pendencias,
                 vencidas=vencidas,
-                vence_hoje=vence_hoje
+                vence_hoje=vence_hoje,
+                nivel_cobranca=nivel_cobranca,
             )
 
             mensagem_acompanhamento = criar_mensagem_acompanhamento(
@@ -1696,7 +1924,8 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
                 prestador=prestador,
                 total_pendencias=total_pendencias,
                 vencidas=vencidas,
-                vence_hoje=vence_hoje
+                vence_hoje=vence_hoje,
+                nivel_cobranca=nivel_cobranca,
             )
 
         linhas.append({
@@ -1708,6 +1937,8 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
             "Total Pendências": total_pendencias,
             "Vencidas": vencidas,
             "Vence Hoje": vence_hoje,
+            "Nível de Cobrança": nivel_cobranca,
+            "Tendência": tendencia,
             "Status Envio": status,
             "Mensagem": mensagem_manha,
             "Mensagem Manhã": mensagem_manha,
@@ -1721,6 +1952,108 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador):
 
     return df_envios
 
+
+def criar_dataframe_envios_tecnicos(df_pendencias, tecnicos_whatsapp, imagens_por_tecnico):
+    """Fila de envio individual pro técnico (RS-SMART matriz) — só as OSs cujo
+    Prestador é a matriz (MOBYAN_PRESTADOR_MATRIZ), pra não duplicar cobrança com
+    o responsável de uma base terceirizada que já recebe mensagem sobre a mesma
+    OS (decisão confirmada com o usuário)."""
+    print("Criando fila de envios por técnico...")
+
+    colunas_envios_tecnicos = [
+        "Técnico",
+        "WhatsApp",
+        "Imagem",
+        "Total Pendências",
+        "Vencidas",
+        "Vence Hoje",
+        "Status Envio",
+        "Mensagem",
+        "Mensagem Manhã",
+        "Mensagem Acompanhamento",
+        "Observação",
+    ]
+
+    if tecnicos_whatsapp.empty or not MOBYAN_PRESTADOR_MATRIZ:
+        print("Nenhum técnico com WhatsApp cadastrado ou matriz não configurada — pulando fila de técnicos.")
+        return pd.DataFrame(columns=colunas_envios_tecnicos)
+
+    # Comparação normalizada (sem acento/caixa/espaço) pro Prestador — o dado
+    # cru do relatório da Mobyan não é garantido bater letra a letra com o valor
+    # configurado. Pro Técnico, compara pelo "Nome no Sistema" (quando ele usa
+    # lá o nome de outra pessoa) ou pelo próprio nome cadastrado, por prefixo de
+    # palavras — ver tecnico_bate_com_termo.
+    matriz_norm = normalizar_texto(MOBYAN_PRESTADOR_MATRIZ)
+    df_matriz = df_pendencias[
+        df_pendencias["Prestador"].apply(normalizar_texto) == matriz_norm
+    ].copy()
+
+    linhas = []
+
+    for _, tecnico_registro in tecnicos_whatsapp.iterrows():
+        tecnico = tecnico_registro["Técnico"]
+        whatsapp = tecnico_registro["WhatsApp"]
+        observacao = tecnico_registro["Observação"]
+
+        if df_matriz.empty:
+            df_tecnico = df_matriz
+        else:
+            termo_busca = termo_busca_tecnico(tecnico_registro)
+            mascara = df_matriz["Técnico"].apply(lambda v: tecnico_bate_com_termo(v, termo_busca))
+            df_tecnico = df_matriz[mascara].copy()
+
+        total_pendencias = len(df_tecnico)
+        vencidas = len(df_tecnico[df_tecnico["SITUAÇÃO"] == "VENCIDA"])
+        vence_hoje = len(df_tecnico[df_tecnico["SITUAÇÃO"] == "VENCE HOJE"])
+
+        caminho_imagem = imagens_por_tecnico.get(tecnico, "")
+        caminho_imagem_texto = str(caminho_imagem) if caminho_imagem else ""
+
+        mensagem_manha = ""
+        mensagem_acompanhamento = ""
+
+        if whatsapp == "":
+            status = "WhatsApp não informado"
+        elif total_pendencias == 0:
+            status = "Sem pendências"
+        elif not caminho_imagem or not Path(caminho_imagem).exists():
+            status = "Imagem não encontrada"
+        else:
+            status = "Pronto para envio"
+
+            mensagem_manha = criar_mensagem_tecnico_envio(
+                tecnico=tecnico,
+                total_pendencias=total_pendencias,
+                vencidas=vencidas,
+                vence_hoje=vence_hoje,
+            )
+
+            mensagem_acompanhamento = criar_mensagem_tecnico_acompanhamento(
+                tecnico=tecnico,
+                total_pendencias=total_pendencias,
+                vencidas=vencidas,
+                vence_hoje=vence_hoje,
+            )
+
+        linhas.append({
+            "Técnico": tecnico,
+            "WhatsApp": whatsapp,
+            "Imagem": caminho_imagem_texto,
+            "Total Pendências": total_pendencias,
+            "Vencidas": vencidas,
+            "Vence Hoje": vence_hoje,
+            "Status Envio": status,
+            "Mensagem": mensagem_manha,
+            "Mensagem Manhã": mensagem_manha,
+            "Mensagem Acompanhamento": mensagem_acompanhamento,
+            "Observação": observacao,
+        })
+
+    df_envios_tecnicos = pd.DataFrame(linhas, columns=colunas_envios_tecnicos)
+
+    print(f"Fila de envios por técnico criada: {len(df_envios_tecnicos)} registro(s).")
+
+    return df_envios_tecnicos
 
 
 STATUS_OPERACIONAIS = [
@@ -1810,7 +2143,7 @@ COLUNAS_ACOMPANHAMENTO = [
 ]
 
 
-def obter_primeiro_nome_tecnico(valor):
+def limpar_prefixo_terceirizado_tecnico(valor):
     texto = limpar_valor(valor)
 
     if texto == "":
@@ -1819,12 +2152,42 @@ def obter_primeiro_nome_tecnico(valor):
     # Remove prefixos como (TA), que ocupam espaço e não ajudam na análise diária.
     texto = re.sub(r"^\s*\(\s*TA\s*\)\s*", "", texto, flags=re.IGNORECASE)
     texto = re.sub(r"^\s*TA\s+", "", texto, flags=re.IGNORECASE)
-    texto = re.sub(r"\s+", " ", texto).strip()
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def obter_primeiro_nome_tecnico(valor):
+    texto = limpar_prefixo_terceirizado_tecnico(valor)
 
     if texto == "":
         return ""
 
     return texto.split(" ")[0]
+
+
+def tecnico_bate_com_termo(raw_tecnico, termo_busca):
+    """Compara o "Técnico" cru do relatório da Mobyan com um termo de busca —
+    normalmente o primeiro nome cadastrado, mas pode ser um "Nome no Sistema"
+    de mais de uma palavra (ex: "Vitor Martins"), pra cobrir o caso de um
+    técnico usar no sistema o nome de outra pessoa. Compara por prefixo de
+    palavras, não por igualdade exata, e ignora acento/caixa/espaço."""
+    termo_norm = normalizar_texto(termo_busca)
+
+    if not termo_norm:
+        return False
+
+    raw_norm = normalizar_texto(limpar_prefixo_terceirizado_tecnico(raw_tecnico))
+    palavras_termo = termo_norm.split()
+    palavras_raw = raw_norm.split()
+
+    return palavras_raw[:len(palavras_termo)] == palavras_termo
+
+
+def termo_busca_tecnico(registro_tecnico):
+    """Termo usado pra achar as OSs desse técnico no relatório: o "Nome no
+    Sistema" (quando ele usa no sistema da Mobyan o nome de outra pessoa),
+    senão o próprio nome cadastrado."""
+    alias = str(registro_tecnico.get("Nome no Sistema", "") or "").strip()
+    return alias if alias else registro_tecnico.get("Técnico", "")
 
 
 def criar_backup_planilha_atual():
@@ -2515,6 +2878,61 @@ def formatar_aba_acompanhamento(caminho_xlsx, layout_anterior=None):
     wb.save(caminho_xlsx)
 
 
+COLUNAS_CHAMADOS = [
+    "SITUAÇÃO",
+    "Chamado",
+    "Numero Referencia",
+    "Contratante",
+    "Serviço",
+    "Status",
+    "Data Limite",
+    "Cliente",
+    "CNPJ / CPF",
+    "Cidade",
+    "Técnico",
+    "Prestador",
+    "Justificativa do Abono",
+]
+
+
+def buscar_pendencias_ogea(hoje):
+    """Busca as OSs em aberto da OGEA no mesmo formato usado pela Mobyan, pra
+    alimentar as abas "Pendências OGEA" e "Chamados" (unificada).
+
+    Best-effort de propósito: a OGEA é opcional por conta (nem toda conta
+    habilita as duas plataformas no cadastro — ver autenticacao.py), e mesmo
+    quando habilitada, uma falha pontual no portal não pode travar a geração
+    das pendências da Mobyan, que é o fluxo crítico do dia. Em qualquer um
+    desses casos, devolve um dataframe vazio no mesmo formato em vez de
+    propagar a exceção. Sem o fluxo de abono da Mobyan (marcar_falta_abonar=
+    False) — a OGEA ainda não tem esse workflow."""
+    if not OGEA_USUARIO or not OGEA_SENHA:
+        print("OGEA não configurada para esta conta — a aba 'Pendências OGEA' sairá vazia.")
+        return pd.DataFrame(columns=COLUNAS_CHAMADOS)
+
+    try:
+        caminho_csv_ogea = baixar_relatorio_ogea()
+        df_bruto = ler_relatorio_csv(caminho_csv_ogea)
+    except Exception as erro:
+        print(f"Não consegui buscar o relatório da OGEA agora ({erro}). A aba 'Pendências OGEA' sairá vazia nesta execução.")
+        return pd.DataFrame(columns=COLUNAS_CHAMADOS)
+
+    if "Código" in df_bruto.columns and "Chamado" not in df_bruto.columns:
+        df_bruto["Chamado"] = df_bruto["Código"]
+
+    df_bruto = padronizar_colunas_pendencias(df_bruto)
+
+    coluna_data_limite = encontrar_coluna_data_limite(df_bruto)
+    if coluna_data_limite != "Data Limite":
+        df_bruto["Data Limite"] = df_bruto[coluna_data_limite]
+
+    # Um único login OGEA cobre um prestador só (já filtrado no download) —
+    # diferente da Mobyan, que traz "Prestador" pronto no próprio relatório.
+    df_bruto["Prestador"] = OGEA_PRESTADOR
+
+    return preparar_dataframe_final(df_bruto, hoje, marcar_falta_abonar=False)
+
+
 def gerar_planilha_pendencias(caminho_csv_completo):
     print("Gerando planilha de pendências do dia...")
 
@@ -2548,7 +2966,65 @@ def gerar_planilha_pendencias(caminho_csv_completo):
 
     imagens_por_prestador = gerar_imagens_por_prestador(df_pendencias)
 
-    df_envios = criar_dataframe_envios(df_pendencias, imagens_por_prestador)
+    # OGEA entra só nas abas "Pendências OGEA" e "Chamados" (unificada) por
+    # decisão explícita: Resumo, Acompanhamento (fluxo de abono) e Envios
+    # (WhatsApp) continuam só-Mobyan por enquanto.
+    df_chamados_ogea = buscar_pendencias_ogea(hoje)
+    df_pendencias_ogea = df_chamados_ogea[
+        df_chamados_ogea["SITUAÇÃO"].isin(["VENCIDA", "VENCE HOJE"])
+    ].copy()
+
+    df_chamados_unificado = pd.concat(
+        [
+            df_chamados.assign(Origem="MOBYAN"),
+            df_chamados_ogea.assign(Origem="OGEA"),
+        ],
+        ignore_index=True,
+    )
+    df_chamados_unificado = df_chamados_unificado[["Origem"] + COLUNAS_CHAMADOS]
+
+    # SLA por base: dado histórico complementar, nunca pode travar a geração das
+    # pendências — qualquer falha aqui degrada pra planilha sem essas abas.
+    # Bobina não conta pro controle de SLA (mesmo critério do Acompanhamento
+    # Operacional) — as Pendências/Envios da própria base continuam com bobina.
+    try:
+        df_chamados_unificado_sem_bobina = excluir_bobina(df_chamados_unificado)
+        snapshot_hoje_sla = calcular_snapshot_diario(df_chamados_unificado_sem_bobina, hoje)
+        historico_sla = registrar_historico(snapshot_hoje_sla, hoje)
+        df_ranking_sla = calcular_ranking_sla(historico_sla, snapshot_hoje_sla, hoje)
+        df_detalhe_tecnico_sla = calcular_detalhe_por_tecnico(df_chamados_unificado_sem_bobina, hoje)
+    except Exception as erro:
+        print(f"Não consegui calcular o SLA por base agora ({erro}). As abas 'SLA por Base'/'SLA por Técnico' sairão vazias nesta execução.")
+        df_ranking_sla = pd.DataFrame(columns=COLUNAS_RANKING)
+        df_detalhe_tecnico_sla = pd.DataFrame(columns=COLUNAS_DETALHE_TECNICO)
+
+    df_envios = criar_dataframe_envios(df_pendencias, imagens_por_prestador, df_ranking_sla)
+
+    # Envio individual por técnico (RS-SMART matriz) — mesma tolerância a falha
+    # das outras integrações desta sessão: nunca trava a planilha principal.
+    # Bobina não entra na pendência mostrada/cobrada do técnico. Filtra por
+    # Prestador == MOBYAN_PRESTADOR_MATRIZ ANTES de casar por nome de técnico —
+    # sem isso, um técnico de uma base terceirizada com o mesmo nome (ex: outro
+    # "Fernando" na RS-SMART - CAXIAS DO SUL) entrava na imagem/cobrança de um
+    # técnico da matriz que só por coincidência tem o mesmo primeiro nome.
+    try:
+        df_pendencias_tecnico_sem_bobina = excluir_bobina(df_pendencias)
+        matriz_norm = normalizar_texto(MOBYAN_PRESTADOR_MATRIZ)
+        df_pendencias_matriz = df_pendencias_tecnico_sem_bobina[
+            df_pendencias_tecnico_sem_bobina["Prestador"].apply(normalizar_texto) == matriz_norm
+        ].copy()
+        tecnicos_whatsapp = ler_tecnicos_whatsapp()
+        imagens_por_tecnico = gerar_imagens_por_tecnico(df_pendencias_matriz, tecnicos_whatsapp)
+        df_envios_tecnicos = criar_dataframe_envios_tecnicos(
+            df_pendencias_matriz, tecnicos_whatsapp, imagens_por_tecnico
+        )
+    except Exception as erro:
+        print(f"Não consegui montar a fila de envios por técnico agora ({erro}). A aba 'Envios Técnicos' sairá vazia nesta execução.")
+        df_envios_tecnicos = pd.DataFrame(columns=[
+            "Técnico", "WhatsApp", "Imagem", "Total Pendências", "Vencidas",
+            "Vence Hoje", "Status Envio", "Mensagem", "Mensagem Manhã",
+            "Mensagem Acompanhamento", "Observação",
+        ])
 
     caminho_saida = ARQUIVO_FINAL_PENDENCIAS
 
@@ -2562,21 +3038,32 @@ def gerar_planilha_pendencias(caminho_csv_completo):
 
     with pd.ExcelWriter(caminho_saida, engine="openpyxl") as writer:
         criar_aba_resumo(writer, df_pendencias, df_acompanhamento)
-        df_pendencias.to_excel(writer, index=False, sheet_name="Pendências")
+        df_pendencias.to_excel(writer, index=False, sheet_name="Pendências Mobyan")
+        df_pendencias_ogea.to_excel(writer, index=False, sheet_name="Pendências OGEA")
         df_acompanhamento.to_excel(writer, index=False, sheet_name="Acompanhamento")
-        df_chamados.to_excel(writer, index=False, sheet_name="Chamados")
+        df_chamados_unificado.to_excel(writer, index=False, sheet_name="Chamados")
+        df_ranking_sla.to_excel(writer, index=False, sheet_name="SLA por Base")
+        df_detalhe_tecnico_sla.to_excel(writer, index=False, sheet_name="SLA por Técnico")
         df_envios.to_excel(writer, index=False, sheet_name="Envios")
+        df_envios_tecnicos.to_excel(writer, index=False, sheet_name="Envios Técnicos")
 
-    formatar_planilha_dados(caminho_saida, "Pendências")
+    formatar_planilha_dados(caminho_saida, "Pendências Mobyan")
+    formatar_planilha_dados(caminho_saida, "Pendências OGEA")
     formatar_aba_acompanhamento(caminho_saida, layout_acompanhamento_anterior)
     formatar_planilha_dados(caminho_saida, "Chamados")
-    formatar_aba_envios(caminho_saida)
+    formatar_aba_sla(caminho_saida, "SLA por Base")
+    formatar_aba_sla(caminho_saida, "SLA por Técnico")
+    formatar_aba_envios(caminho_saida, "Envios")
+    formatar_aba_envios(caminho_saida, "Envios Técnicos")
     formatar_aba_resumo(caminho_saida)
 
     print(f"Planilha final salva em: {caminho_saida}")
-    print(f"Total de pendências encontradas: {len(df_pendencias)}")
+    print(f"Total de pendências encontradas (Mobyan): {len(df_pendencias)}")
+    print(f"Total de pendências encontradas (OGEA): {len(df_pendencias_ogea)}")
     print(f"Total de OSs em acompanhamento: {len(df_acompanhamento)}")
-    print(f"Total de chamados no relatório completo: {len(df_chamados)}")
+    print(f"Total de chamados no relatório completo: {len(df_chamados_unificado)}")
+    print(f"Bases em nível crítico de cobrança: {len(df_ranking_sla[df_ranking_sla['Nível de Cobrança'] == 'CRÍTICO']) if not df_ranking_sla.empty else 0}")
+    print(f"Técnicos com envio pronto: {len(df_envios_tecnicos[df_envios_tecnicos['Status Envio'] == 'Pronto para envio']) if not df_envios_tecnicos.empty else 0}")
     print(f"Imagens por prestador salvas em: {PASTA_IMAGENS_PRESTADOR}")
 
     return caminho_saida
@@ -2707,6 +3194,7 @@ def formatar_planilha_dados(caminho_xlsx, nome_aba):
                 cell_observacao_base.fill = preenchimento_base
 
     larguras_personalizadas = {
+        "Origem": 12,
         "SITUAÇÃO": 14,
         "Chamado": 12,
         "Numero Referencia": 18,
@@ -2750,14 +3238,118 @@ def formatar_planilha_dados(caminho_xlsx, nome_aba):
     wb.save(caminho_xlsx)
 
 
-def formatar_aba_envios(caminho_xlsx):
+def formatar_aba_sla(caminho_xlsx, nome_aba):
+    """Formatação das abas 'SLA por Base'/'SLA por Técnico': colore a linha pelo
+    'Nível de Cobrança' quando existe (SLA por Base) ou pela quantidade de
+    'Vencidas' quando não (SLA por Técnico, que é só detalhe informativo)."""
     wb = load_workbook(caminho_xlsx)
 
-    if "Envios" not in wb.sheetnames:
+    if nome_aba not in wb.sheetnames:
         wb.save(caminho_xlsx)
         return
 
-    ws = wb["Envios"]
+    ws = wb[nome_aba]
+    max_row = ws.max_row
+    max_col = ws.max_column
+
+    if max_row <= 1:
+        wb.save(caminho_xlsx)
+        return
+
+    preenchimento_cabecalho = PatternFill("solid", fgColor="1F4E78")
+    fonte_cabecalho = Font(color="FFFFFF", bold=True)
+
+    preenchimento_critico = PatternFill("solid", fgColor="F4CCCC")
+    preenchimento_atencao = PatternFill("solid", fgColor="FFF2CC")
+    preenchimento_normal = PatternFill("solid", fgColor="D9EAD3")
+
+    borda_fina = Border(
+        left=Side(style="thin", color="D9E2F3"),
+        right=Side(style="thin", color="D9E2F3"),
+        top=Side(style="thin", color="D9E2F3"),
+        bottom=Side(style="thin", color="D9E2F3"),
+    )
+
+    for cell in ws[1]:
+        cell.fill = preenchimento_cabecalho
+        cell.font = fonte_cabecalho
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = borda_fina
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    headers = [cell.value for cell in ws[1]]
+    col_nivel = headers.index("Nível de Cobrança") + 1 if "Nível de Cobrança" in headers else None
+    col_vencidas = headers.index("Vencidas") + 1 if "Vencidas" in headers else None
+
+    for row in range(2, max_row + 1):
+        if col_nivel:
+            nivel = ws.cell(row=row, column=col_nivel).value
+        elif col_vencidas:
+            vencidas = ws.cell(row=row, column=col_vencidas).value or 0
+            if vencidas >= LIMIAR_CRITICO_VENCIDAS:
+                nivel = "CRÍTICO"
+            elif vencidas >= LIMIAR_ATENCAO_VENCIDAS:
+                nivel = "ATENÇÃO"
+            else:
+                nivel = "NORMAL"
+        else:
+            nivel = "NORMAL"
+
+        if nivel == "CRÍTICO":
+            preenchimento_linha = preenchimento_critico
+        elif nivel == "ATENÇÃO":
+            preenchimento_linha = preenchimento_atencao
+        else:
+            preenchimento_linha = preenchimento_normal
+
+        for col in range(1, max_col + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.fill = preenchimento_linha
+            cell.border = borda_fina
+            cell.alignment = Alignment(vertical="center", wrap_text=False)
+
+    larguras = {
+        "Data": 14,
+        "Origem": 12,
+        "Prestador": 30,
+        "Técnico": 24,
+        "Cidade": 26,
+        "Total Pendentes": 16,
+        "Vencidas": 12,
+        "Vence Hoje": 14,
+        "Futuras": 12,
+        "Falta Abonar": 14,
+        "Atraso Médio (dias)": 18,
+        "Maior Atraso (dias)": 18,
+        "Média Vencidas (7d)": 18,
+        "Tendência": 14,
+        "Nível de Cobrança": 16,
+    }
+
+    for col in range(1, max_col + 1):
+        letra = get_column_letter(col)
+        cabecalho = ws.cell(row=1, column=col).value
+
+        ws.column_dimensions[letra].width = larguras.get(cabecalho, 16)
+
+    ws.row_dimensions[1].height = 24
+
+    for row in range(2, max_row + 1):
+        ws.row_dimensions[row].height = 18
+
+    wb.save(caminho_xlsx)
+
+
+def formatar_aba_envios(caminho_xlsx, nome_aba="Envios"):
+    wb = load_workbook(caminho_xlsx)
+
+    if nome_aba not in wb.sheetnames:
+        wb.save(caminho_xlsx)
+        return
+
+    ws = wb[nome_aba]
 
     max_row = ws.max_row
     max_col = ws.max_column
@@ -2830,12 +3422,15 @@ def formatar_aba_envios(caminho_xlsx):
     larguras = {
         "Prestador": 34,
         "Responsável": 24,
+        "Técnico": 24,
         "WhatsApp": 20,
         "Enviar": 12,
         "Imagem": 70,
         "Total Pendências": 18,
         "Vencidas": 12,
         "Vence Hoje": 14,
+        "Nível de Cobrança": 16,
+        "Tendência": 14,
         "Status Envio": 24,
         "Mensagem": 18,
         "Mensagem Manhã": 72,
@@ -2999,7 +3594,17 @@ def formatar_aba_resumo(caminho_xlsx):
 
     ws.sheet_view.showGridLines = False
 
-    ordem = ["Resumo", "Pendências", "Acompanhamento", "Chamados", "Envios"]
+    ordem = [
+        "Resumo",
+        "Pendências Mobyan",
+        "Pendências OGEA",
+        "Acompanhamento",
+        "Chamados",
+        "SLA por Base",
+        "SLA por Técnico",
+        "Envios",
+        "Envios Técnicos",
+    ]
 
     novas_sheets = []
 

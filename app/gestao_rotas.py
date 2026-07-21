@@ -50,7 +50,7 @@ CAB_REGRAS = [
 CAB_ALIASES = [
     "Ativo", "Cidade", "Nome recebido", "Nome considerado", "Técnico", "Observação", "Origem",
 ]
-CAB_TECNICOS = ["Ativo", "Técnico", "Observação"]
+CAB_TECNICOS = ["Ativo", "Técnico", "WhatsApp", "Nome no Sistema", "Observação"]
 CAB_HISTORICO = [
     "Data/Hora", "Tipo", "Ação", "Origem", "Cidade", "Chave",
     "Valor novo", "Valor anterior", "Observação", "Usuário",
@@ -909,12 +909,16 @@ class GestaoRotasWindow:
 
         tk.Label(
             self.tab_tecnicos,
-            text="Cadastre aqui os técnicos pra eles já aparecerem prontos na hora de criar regras e resolver pendências.",
-            bg=COR_FUNDO_2, fg=COR_TEXTO_FRACO, font=("Arial", 9), anchor="w",
+            text=(
+                "Cadastre aqui os técnicos pra eles já aparecerem prontos na hora de criar regras e resolver pendências. "
+                "Se o nome usado no sistema da Mobyan for diferente do nome real do técnico (ex: usa o nome de outra pessoa), "
+                "preencha \"Nome no Sistema\" pra ligar as OSs a ele corretamente."
+            ),
+            bg=COR_FUNDO_2, fg=COR_TEXTO_FRACO, font=("Arial", 9), anchor="w", wraplength=900, justify="left",
         ).pack(fill="x", padx=12, pady=(0, 8))
 
-        cols = ["Ativo", "Técnico", "Observação"]
-        cont, self.tree_tecnicos = self._tree(self.tab_tecnicos, cols, [55, 260, 400])
+        cols = ["Ativo", "Técnico", "WhatsApp", "Nome no Sistema", "Observação"]
+        cont, self.tree_tecnicos = self._tree(self.tab_tecnicos, cols, [55, 180, 150, 150, 220])
         cont.pack(fill="both", expand=True, padx=12, pady=(0, 8))
         self.tree_tecnicos.bind("<Double-1>", lambda e: self.editar_tecnico())
 
@@ -1342,7 +1346,10 @@ class GestaoRotasWindow:
                 continue
             self.tree_tecnicos.insert(
                 "", "end", iid=str(r["_linha"]),
-                values=(r.get("Ativo", ""), r.get("Técnico", ""), r.get("Observação", "")),
+                values=(
+                    r.get("Ativo", ""), r.get("Técnico", ""), r.get("WhatsApp", ""),
+                    r.get("Nome no Sistema", ""), r.get("Observação", ""),
+                ),
             )
 
     def _carregar_tree_historico(self):
@@ -1462,6 +1469,8 @@ class GestaoRotasWindow:
         registro = registro or {}
         campos = [
             ("Técnico", "text", None),
+            ("WhatsApp", "text", None),
+            ("Nome no Sistema", "text", None),
             ("Observação", "text", None),
         ]
         valores = {nome: registro.get(nome, "") for nome, _, _ in campos}

@@ -607,16 +607,34 @@ def solicitar_relatorio_completo_ogea(page):
         botao_exportar,
         "botão Exportar",
     )
-    botao_exportar.click()
 
     opcao_completo = page.get_by_role(
         "link",
         name="Completo (via Exporter)",
     )
-    esperar_elemento_ogea(
-        opcao_completo,
-        "opção Completo (via Exporter)",
-    )
+
+    # O clique no botão Exportar às vezes não abre o menu suspenso na primeira
+    # tentativa (o robô segue em frente achando que abriu e trava esperando
+    # uma opção que nunca vai aparecer) — clicar de novo até o menu realmente
+    # abrir resolve, em vez de confiar cegamente no primeiro clique.
+    tentativas = 5
+    for tentativa in range(1, tentativas + 1):
+        botao_exportar.scroll_into_view_if_needed()
+        botao_exportar.click()
+
+        try:
+            opcao_completo.wait_for(state="visible", timeout=3000)
+            break
+        except Exception:
+            print(
+                f"Menu Exportar não abriu na tentativa {tentativa}/{tentativas}, "
+                "tentando de novo..."
+            )
+    else:
+        raise TimeoutError(
+            "O menu do botão Exportar não abriu depois de várias tentativas."
+        )
+
     opcao_completo.click()
 
     print("Solicitação enviada ao Exporter.")

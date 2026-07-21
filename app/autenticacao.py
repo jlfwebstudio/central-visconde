@@ -437,27 +437,10 @@ def _abrir_janela_login():
 # Interface gráfica
 # ---------------------------------------------------------------------------
 
-class _JanelaAutenticacao:
-    def __init__(self, root):
-        self.root = root
-        self.autenticado = False
-        self.token = None
-        self.usuario = None
-
-        self.root.title("ViscondeApp — Entrar")
-        self.root.configure(bg=COR_FUNDO)
-        self.root.geometry("460x560")
-        self.root.minsize(420, 520)
-        self.root.protocol("WM_DELETE_WINDOW", self._fechar)
-
-        self.container = tk.Frame(self.root, bg=COR_FUNDO)
-        self.container.pack(fill="both", expand=True, padx=28, pady=28)
-
-        self._mostrar_login()
-
-    def _fechar(self):
-        self.autenticado = False
-        self.root.destroy()
+class _TelaFormulario:
+    """Widgets de formulário compartilhados entre a tela de login/cadastro e a
+    tela de configurações da conta (edição pós-cadastro) — mesma identidade
+    visual, sem duplicar os construtores de campo/botão em cada classe."""
 
     def _limpar_container(self):
         for widget in self.container.winfo_children():
@@ -530,6 +513,29 @@ class _JanelaAutenticacao:
         rotulo.pack(pady=(16, 0))
         rotulo.bind("<Button-1>", lambda _evento: comando())
         return rotulo
+
+
+class _JanelaAutenticacao(_TelaFormulario):
+    def __init__(self, root):
+        self.root = root
+        self.autenticado = False
+        self.token = None
+        self.usuario = None
+
+        self.root.title("ViscondeApp — Entrar")
+        self.root.configure(bg=COR_FUNDO)
+        self.root.geometry("460x620")
+        self.root.minsize(420, 560)
+        self.root.protocol("WM_DELETE_WINDOW", self._fechar)
+
+        self.container = tk.Frame(self.root, bg=COR_FUNDO)
+        self.container.pack(fill="both", expand=True, padx=28, pady=28)
+
+        self._mostrar_login()
+
+    def _fechar(self):
+        self.autenticado = False
+        self.root.destroy()
 
     # -- Tela 1: login/cadastro -------------------------------------------------
 
@@ -612,6 +618,7 @@ class _JanelaAutenticacao:
         self.usuario = usuario
         self.expira_em = resposta["expira_em"]
         self.plataformas = {}
+        self.config_extra = {}
         self._mostrar_pergunta_ogea()
 
     # -- Tela 3: pergunta OGEA ---------------------------------------------------
@@ -635,6 +642,10 @@ class _JanelaAutenticacao:
 
         self.campo_ogea_usuario = self._campo("Usuário OGEA")
         self.campo_ogea_senha = self._campo("Senha OGEA", mostrar="*")
+        self.campo_ogea_base = self._campo(
+            "Nome exato da sua base na OGEA (ex: SMART TECNOLOGIA) — é o que aparece "
+            "lá dentro do sistema, pode ser diferente do nome da sua empresa"
+        )
 
         self._botao("Continuar", self._salvar_ogea_e_avancar)
         self._link("Pular OGEA", self._mostrar_pergunta_mobyan)
@@ -642,9 +653,10 @@ class _JanelaAutenticacao:
     def _salvar_ogea_e_avancar(self):
         usuario = self.campo_ogea_usuario.get().strip()
         senha = self.campo_ogea_senha.get()
+        base = self.campo_ogea_base.get().strip()
 
-        if not usuario or not senha:
-            messagebox.showwarning("ViscondeApp", "Preencha usuário e senha da OGEA.")
+        if not usuario or not senha or not base:
+            messagebox.showwarning("ViscondeApp", "Preencha usuário, senha e o nome da base da OGEA.")
             return
 
         self.plataformas["OGEA"] = {
@@ -653,6 +665,7 @@ class _JanelaAutenticacao:
             "senha": senha,
             "ativo": True,
         }
+        self.config_extra["OGEA_PRESTADOR"] = base
         self._mostrar_pergunta_mobyan()
 
     # -- Tela 4: pergunta Mobyan --------------------------------------------------
@@ -677,6 +690,11 @@ class _JanelaAutenticacao:
         self.campo_mobyan_url = self._campo("URL de login da Mobyan")
         self.campo_mobyan_usuario = self._campo("Usuário Mobyan")
         self.campo_mobyan_senha = self._campo("Senha Mobyan", mostrar="*")
+        self.campo_mobyan_base = self._campo(
+            "Nome exato da(s) sua(s) base(s) na Mobyan — separe por vírgula se tiver "
+            "mais de uma (ex: RS-SMART, RS-SMART - PELOTAS)"
+        )
+        self.campo_mobyan_estado = self._campo("Sigla do estado filtrado na Mobyan (ex: RS)")
 
         self._botao("Continuar", self._salvar_mobyan_e_avancar)
         self._link("Pular Mobyan", self._mostrar_aviso_fedex)
@@ -685,9 +703,11 @@ class _JanelaAutenticacao:
         url = self.campo_mobyan_url.get().strip()
         usuario = self.campo_mobyan_usuario.get().strip()
         senha = self.campo_mobyan_senha.get()
+        base = self.campo_mobyan_base.get().strip()
+        estado = self.campo_mobyan_estado.get().strip()
 
-        if not url or not usuario or not senha:
-            messagebox.showwarning("ViscondeApp", "Preencha URL, usuário e senha da Mobyan.")
+        if not url or not usuario or not senha or not base or not estado:
+            messagebox.showwarning("ViscondeApp", "Preencha URL, usuário, senha, base e estado da Mobyan.")
             return
 
         self.plataformas["MOBYAN"] = {
@@ -696,6 +716,8 @@ class _JanelaAutenticacao:
             "senha": senha,
             "ativo": True,
         }
+        self.config_extra["MOBYAN_PRESTADORES"] = base
+        self.config_extra["MOBYAN_ESTADO"] = estado
         self._mostrar_aviso_fedex()
 
     # -- Tela 5: aviso FedEx + conclusão ------------------------------------------
@@ -711,7 +733,7 @@ class _JanelaAutenticacao:
 
     def _concluir_cadastro(self):
         try:
-            salvar_config(self.token, self.plataformas)
+            salvar_config(self.token, self.plataformas, self.config_extra)
             config_conta = obter_config(self.token)
             trocar_para_conta(self.usuario)
             materializar_env(config_conta)
@@ -728,3 +750,169 @@ class _JanelaAutenticacao:
 
         self.autenticado = True
         self.root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Configurações da conta (edição pós-cadastro: credenciais e bases)
+# ---------------------------------------------------------------------------
+
+class _JanelaConfiguracaoConta(_TelaFormulario):
+    """Formulário único (sem o passo a passo do cadastro) pra editar depois
+    o que foi respondido na hora de criar a conta — principalmente o nome
+    exato da base em cada plataforma, já que uma conta pode passar a puxar
+    bases adicionais depois do cadastro inicial."""
+
+    def __init__(self, master, token, usuario, config_conta, ao_salvar=None):
+        self.token = token
+        self.usuario = usuario
+        self.ao_salvar = ao_salvar
+
+        plataformas = config_conta.get("plataformas", {})
+        self.ogea_atual = plataformas.get("OGEA") or {}
+        self.mobyan_atual = plataformas.get("MOBYAN") or {}
+        self.config_atual = config_conta.get("config", {})
+
+        self.root = tk.Toplevel(master)
+        self.root.title("ViscondeApp — Configurações da conta")
+        self.root.configure(bg=COR_FUNDO)
+        self.root.geometry("520x760")
+        self.root.minsize(460, 620)
+        self.root.transient(master)
+        self.root.grab_set()
+
+        self.container = tk.Frame(self.root, bg=COR_FUNDO)
+        self.container.pack(fill="both", expand=True, padx=28, pady=28)
+
+        self._montar_formulario()
+
+    def _secao(self, texto):
+        tk.Label(
+            self.container,
+            text=texto,
+            bg=COR_FUNDO,
+            fg=COR_DOURADO,
+            font=("Arial", 12, "bold"),
+        ).pack(anchor="w", pady=(18, 0))
+
+    def _montar_formulario(self):
+        self._titulo("Configurações da conta", f"Conta: {self.usuario}")
+
+        self._secao("OGEA")
+        self.campo_ogea_usuario = self._campo("Usuário OGEA")
+        self.campo_ogea_usuario.insert(0, self.ogea_atual.get("usuario", ""))
+        self.campo_ogea_senha = self._campo("Senha OGEA (deixe em branco pra manter a atual)", mostrar="*")
+        self.campo_ogea_base = self._campo("Nome exato da sua base na OGEA")
+        self.campo_ogea_base.insert(0, self.config_atual.get("OGEA_PRESTADOR", ""))
+
+        self._secao("MOBYAN")
+        self.campo_mobyan_url = self._campo("URL de login da Mobyan")
+        self.campo_mobyan_url.insert(0, self.mobyan_atual.get("url", ""))
+        self.campo_mobyan_usuario = self._campo("Usuário Mobyan")
+        self.campo_mobyan_usuario.insert(0, self.mobyan_atual.get("usuario", ""))
+        self.campo_mobyan_senha = self._campo("Senha Mobyan (deixe em branco pra manter a atual)", mostrar="*")
+        self.campo_mobyan_base = self._campo("Base(s) na Mobyan — separadas por vírgula")
+        prestadores = self.config_atual.get("MOBYAN_PRESTADORES", "")
+        if isinstance(prestadores, list):
+            prestadores = ", ".join(prestadores)
+        self.campo_mobyan_base.insert(0, prestadores)
+        self.campo_mobyan_estado = self._campo("Sigla do estado filtrado na Mobyan")
+        self.campo_mobyan_estado.insert(0, self.config_atual.get("MOBYAN_ESTADO", ""))
+
+        self._botao("Salvar alterações", self._salvar)
+        self._link("Fechar sem salvar", self.root.destroy)
+
+    def _salvar(self):
+        plataformas = {}
+
+        usuario_ogea = self.campo_ogea_usuario.get().strip()
+        base_ogea = self.campo_ogea_base.get().strip()
+        senha_ogea = self.campo_ogea_senha.get()
+        if usuario_ogea and base_ogea:
+            if not senha_ogea and not self.ogea_atual.get("usuario"):
+                messagebox.showwarning("ViscondeApp", "Preencha a senha da OGEA (é a primeira vez que essa plataforma é configurada).")
+                return
+            plataformas["OGEA"] = {
+                "url": self.ogea_atual.get("url") or OGEA_URL_PADRAO,
+                "usuario": usuario_ogea,
+                "senha": senha_ogea,
+                "ativo": True,
+            }
+        elif usuario_ogea or base_ogea:
+            messagebox.showwarning("ViscondeApp", "Preencha usuário e base da OGEA (ou deixe os dois em branco).")
+            return
+
+        url_mobyan = self.campo_mobyan_url.get().strip()
+        usuario_mobyan = self.campo_mobyan_usuario.get().strip()
+        base_mobyan = self.campo_mobyan_base.get().strip()
+        estado_mobyan = self.campo_mobyan_estado.get().strip()
+        senha_mobyan = self.campo_mobyan_senha.get()
+        if url_mobyan and usuario_mobyan and base_mobyan and estado_mobyan:
+            if not senha_mobyan and not self.mobyan_atual.get("usuario"):
+                messagebox.showwarning("ViscondeApp", "Preencha a senha da Mobyan (é a primeira vez que essa plataforma é configurada).")
+                return
+            plataformas["MOBYAN"] = {
+                "url": url_mobyan,
+                "usuario": usuario_mobyan,
+                "senha": senha_mobyan,
+                "ativo": True,
+            }
+        elif url_mobyan or usuario_mobyan or base_mobyan or estado_mobyan:
+            messagebox.showwarning(
+                "ViscondeApp",
+                "Preencha URL, usuário, base e estado da Mobyan (ou deixe tudo em branco).",
+            )
+            return
+
+        config_extra = {}
+        if base_ogea:
+            config_extra["OGEA_PRESTADOR"] = base_ogea
+        if base_mobyan:
+            config_extra["MOBYAN_PRESTADORES"] = base_mobyan
+        if estado_mobyan:
+            config_extra["MOBYAN_ESTADO"] = estado_mobyan
+
+        try:
+            salvar_config(self.token, plataformas, config_extra)
+            config_conta = obter_config(self.token)
+            materializar_env(config_conta)
+        except ConexaoBackendError:
+            messagebox.showerror(
+                "ViscondeApp",
+                "Não consegui falar com o servidor de contas. Verifique sua internet e tente de novo.",
+            )
+            return
+        except ErroAutenticacao as erro:
+            messagebox.showerror("ViscondeApp", str(erro))
+            return
+
+        messagebox.showinfo("ViscondeApp", "Configurações salvas. As próximas automações já usam os novos dados.")
+        if self.ao_salvar:
+            self.ao_salvar()
+        self.root.destroy()
+
+
+def abrir_configuracoes_conta(master, ao_salvar=None):
+    """Abre a janela de configurações da conta logada. Retorna a instância da
+    janela (ou None se não há sessão local válida ou o backend não respondeu),
+    seguindo o mesmo padrão de "nunca travar o app" já usado em
+    verificar_atualizacao()."""
+    sessao = carregar_sessao_local()
+    if not sessao:
+        messagebox.showwarning("ViscondeApp", "Faça login novamente para editar as configurações da conta.")
+        return None
+
+    try:
+        config_conta = obter_config(sessao["token"])
+    except ConexaoBackendError:
+        messagebox.showerror(
+            "ViscondeApp",
+            "Não consegui falar com o servidor de contas. Verifique sua internet e tente de novo.",
+        )
+        return None
+    except ErroAutenticacao as erro:
+        messagebox.showerror("ViscondeApp", str(erro))
+        return None
+
+    return _JanelaConfiguracaoConta(
+        master, sessao["token"], sessao.get("usuario", ""), config_conta, ao_salvar=ao_salvar
+    )

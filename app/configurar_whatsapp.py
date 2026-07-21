@@ -65,19 +65,27 @@ def listar_prestadores():
 
 def normalizar_whatsapp(valor):
     digitos = re.sub(r"\D", "", str(valor or ""))
-    if len(digitos) not in (10, 11):
+    # Aceita com ou sem o código do país (55) na frente — o envio real
+    # (enviar_whatsapp.py) precisa do número completo com código do país pra
+    # abrir a conversa certa no WhatsApp Web, então sempre normaliza pra esse
+    # formato final, adicionando o 55 automaticamente se faltar.
+    if len(digitos) in (10, 11):
+        digitos = "55" + digitos
+    if len(digitos) not in (12, 13) or not digitos.startswith("55"):
         raise ValueError(
-            "WhatsApp inválido — informe DDD + número (10 ou 11 dígitos), ex.: 51999998888."
+            "WhatsApp inválido — informe DDD + número, com ou sem o 55 na frente, "
+            "ex.: 51999998888 ou 5551999998888."
         )
     return digitos
 
 
 def formatar_whatsapp(valor):
     digitos = re.sub(r"\D", "", str(valor or ""))
-    if len(digitos) == 11:
-        return f"({digitos[:2]}) {digitos[2:7]}-{digitos[7:]}"
-    if len(digitos) == 10:
-        return f"({digitos[:2]}) {digitos[2:6]}-{digitos[6:]}"
+    resto = digitos[2:] if digitos.startswith("55") and len(digitos) in (12, 13) else digitos
+    if len(resto) == 11:
+        return f"+55 ({resto[:2]}) {resto[2:7]}-{resto[7:]}"
+    if len(resto) == 10:
+        return f"+55 ({resto[:2]}) {resto[2:6]}-{resto[6:]}"
     return digitos
 
 

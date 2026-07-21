@@ -16,6 +16,10 @@ PASTA_TEMP_WHATSAPP = BASE_DIR / "outputs" / "whatsapp_temp"
 # "manha" ou "acompanhamento"
 MODELO_MENSAGEM = os.getenv("MODELO_MENSAGEM", "manha").strip().lower()
 
+# Destino recebido pela Central Mobyan (tela "Para quem é esse envio?"):
+# "bases" (prestadores, aba "Envios") ou "tecnicos" (RS-SMART, aba "Envios Técnicos")
+DESTINO_ENVIO = os.getenv("DESTINO_ENVIO", "bases").strip().lower()
+
 # True = envia automaticamente
 # False = prepara o envio, mas você envia manualmente
 ENVIAR_DE_VERDADE = True
@@ -112,6 +116,62 @@ def ler_fila_envios():
     print(f"Coluna usada para envio: {coluna_mensagem}")
 
     return df
+
+
+def ler_fila_envios_tecnicos():
+    """Mesmo formato de ler_fila_envios(), mas pra fila de técnicos (RS-SMART
+    matriz — aba "Envios Técnicos", ver exportador_mobyan.py). Tolerante à
+    ausência da aba: uma planilha gerada antes dessa atualização, ou uma conta
+    sem nenhum técnico com WhatsApp cadastrado, simplesmente não tem envio de
+    técnico nenhum, sem quebrar o envio das bases."""
+    if not ARQUIVO_PLANILHA.exists():
+        return pd.DataFrame(columns=["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"])
+
+    try:
+        df = pd.read_excel(
+            ARQUIVO_PLANILHA,
+            sheet_name="Envios Técnicos",
+            dtype=str,
+            keep_default_na=False,
+            na_filter=False,
+        )
+    except Exception:
+        return pd.DataFrame(columns=["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"])
+
+    df.columns = [str(coluna).strip() for coluna in df.columns]
+
+    coluna_mensagem = obter_coluna_mensagem()
+
+    if coluna_mensagem not in df.columns:
+        if coluna_mensagem == "Mensagem Manhã" and "Mensagem" in df.columns:
+            coluna_mensagem = "Mensagem"
+        else:
+            return pd.DataFrame(columns=["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"])
+
+    colunas_obrigatorias = ["Técnico", "WhatsApp", "Imagem", "Status Envio", coluna_mensagem]
+
+    for coluna in colunas_obrigatorias:
+        if coluna not in df.columns:
+            return pd.DataFrame(columns=["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"])
+
+    for coluna in df.columns:
+        df[coluna] = df[coluna].astype(str).str.strip()
+
+    df["_Mensagem_Selecionada"] = df[coluna_mensagem].fillna("").astype(str).str.strip()
+
+    df = df[df["Status Envio"] == "Pronto para envio"].copy()
+    df = df[df["WhatsApp"] != ""].copy()
+    df = df[df["Imagem"] != ""].copy()
+    df = df[df["_Mensagem_Selecionada"] != ""].copy()
+
+    # Normaliza pro mesmo formato que processar_envio já espera, sem precisar
+    # tocar em processar_envio/abrir_conversa/anexar_imagem/clicar_enviar.
+    df["Prestador"] = "Técnico: " + df["Técnico"]
+    df["Responsável"] = df["Técnico"]
+
+    print(f"Envios de técnico prontos: {len(df)}")
+
+    return df[["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"]]
 
 
 def aguardar_login_whatsapp(page):
@@ -401,10 +461,13 @@ def processar_envio(page, linha):
 
 
 def enviar_whatsapp():
-    df_envios = ler_fila_envios()
+    if DESTINO_ENVIO == "tecnicos":
+        df_envios = ler_fila_envios_tecnicos()
+    else:
+        df_envios = ler_fila_envios()
 
     if df_envios.empty:
-        print("Nenhum envio encontrado com Enviar = Sim e Status Envio = Pronto para envio.")
+        print(f"Nenhum envio encontrado para o destino '{DESTINO_ENVIO}' com Status Envio = Pronto para envio.")
         return
 
     if LIMITE_ENVIOS is not None:
