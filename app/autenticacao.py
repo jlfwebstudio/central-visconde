@@ -354,6 +354,7 @@ def materializar_env(config_conta):
         "MOBYAN_PRESTADORES",
         "MOBYAN_ESTADO",
         "OGEA_PRESTADOR",
+        "MOBYAN_RELATORIO_USER",
     ):
         valor = config_extra.get(chave)
         if valor is None or valor == "":
@@ -695,6 +696,9 @@ class _JanelaAutenticacao(_TelaFormulario):
             "mais de uma (ex: RS-SMART, RS-SMART - PELOTAS)"
         )
         self.campo_mobyan_estado = self._campo("Sigla do estado filtrado na Mobyan (ex: RS)")
+        self.campo_mobyan_relatorio_user = self._campo(
+            "Usuário do relatório Mobyan (opcional, deixe em branco se não souber)"
+        )
 
         self._botao("Continuar", self._salvar_mobyan_e_avancar)
         self._link("Pular Mobyan", self._mostrar_aviso_fedex)
@@ -718,6 +722,9 @@ class _JanelaAutenticacao(_TelaFormulario):
         }
         self.config_extra["MOBYAN_PRESTADORES"] = base
         self.config_extra["MOBYAN_ESTADO"] = estado
+        relatorio_user = self.campo_mobyan_relatorio_user.get().strip()
+        if relatorio_user:
+            self.config_extra["MOBYAN_RELATORIO_USER"] = relatorio_user
         self._mostrar_aviso_fedex()
 
     # -- Tela 5: aviso FedEx + conclusão ------------------------------------------
@@ -817,6 +824,10 @@ class _JanelaConfiguracaoConta(_TelaFormulario):
         self.campo_mobyan_base.insert(0, prestadores)
         self.campo_mobyan_estado = self._campo("Sigla do estado filtrado na Mobyan")
         self.campo_mobyan_estado.insert(0, self.config_atual.get("MOBYAN_ESTADO", ""))
+        self.campo_mobyan_relatorio_user = self._campo(
+            "Usuário do relatório Mobyan (só preencha se o suporte pedir)"
+        )
+        self.campo_mobyan_relatorio_user.insert(0, self.config_atual.get("MOBYAN_RELATORIO_USER", ""))
 
         self._botao("Salvar alterações", self._salvar)
         self._link("Fechar sem salvar", self.root.destroy)
@@ -863,6 +874,8 @@ class _JanelaConfiguracaoConta(_TelaFormulario):
             )
             return
 
+        relatorio_user_mobyan = self.campo_mobyan_relatorio_user.get().strip()
+
         config_extra = {}
         if base_ogea:
             config_extra["OGEA_PRESTADOR"] = base_ogea
@@ -870,6 +883,8 @@ class _JanelaConfiguracaoConta(_TelaFormulario):
             config_extra["MOBYAN_PRESTADORES"] = base_mobyan
         if estado_mobyan:
             config_extra["MOBYAN_ESTADO"] = estado_mobyan
+        if relatorio_user_mobyan:
+            config_extra["MOBYAN_RELATORIO_USER"] = relatorio_user_mobyan
 
         try:
             salvar_config(self.token, plataformas, config_extra)
