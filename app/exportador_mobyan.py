@@ -532,6 +532,17 @@ def excluir_bobina(df):
     return df[~df["Serviço"].fillna("").astype(str).str.upper().str.contains("BOBINA", na=False)].copy()
 
 
+def excluir_cartao_courier(df):
+    """Entrega de venda por courier (OS de cartão) não precisa de ação de
+    técnico/base — é resolvida direto pelo courier. Usado só na hora de montar
+    o que vai pro WhatsApp (imagens + abas Envios/Envios Técnicos); as abas
+    Pendências Mobyan/Chamados/Acompanhamento e o SLA continuam mostrando essa
+    OS normalmente, pra não sumir do controle interno."""
+    if df.empty or "Serviço" not in df.columns:
+        return df.copy()
+    return df[~df["Serviço"].fillna("").astype(str).str.upper().str.contains("COURIER", na=False)].copy()
+
+
 def limpar_nome_arquivo(texto):
     texto = "" if texto is None else str(texto).strip()
 
@@ -2964,7 +2975,11 @@ def gerar_planilha_pendencias(caminho_csv_completo):
         acompanhamento_anterior=acompanhamento_anterior,
     )
 
-    imagens_por_prestador = gerar_imagens_por_prestador(df_pendencias)
+    # OS de cartão (entrega por courier) não entra na mensagem/imagem do
+    # WhatsApp — Pendências Mobyan/Chamados/Acompanhamento continuam com ela.
+    df_pendencias_sem_cartao = excluir_cartao_courier(df_pendencias)
+
+    imagens_por_prestador = gerar_imagens_por_prestador(df_pendencias_sem_cartao)
 
     # OGEA entra só nas abas "Pendências OGEA" e "Chamados" (unificada) por
     # decisão explícita: Resumo, Acompanhamento (fluxo de abono) e Envios
@@ -2998,17 +3013,18 @@ def gerar_planilha_pendencias(caminho_csv_completo):
         df_ranking_sla = pd.DataFrame(columns=COLUNAS_RANKING)
         df_detalhe_tecnico_sla = pd.DataFrame(columns=COLUNAS_DETALHE_TECNICO)
 
-    df_envios = criar_dataframe_envios(df_pendencias, imagens_por_prestador, df_ranking_sla)
+    df_envios = criar_dataframe_envios(df_pendencias_sem_cartao, imagens_por_prestador, df_ranking_sla)
 
     # Envio individual por técnico (RS-SMART matriz) — mesma tolerância a falha
     # das outras integrações desta sessão: nunca trava a planilha principal.
-    # Bobina não entra na pendência mostrada/cobrada do técnico. Filtra por
+    # Bobina e OS de cartão (courier) não entram na pendência mostrada/cobrada
+    # do técnico. Filtra por
     # Prestador == MOBYAN_PRESTADOR_MATRIZ ANTES de casar por nome de técnico —
     # sem isso, um técnico de uma base terceirizada com o mesmo nome (ex: outro
     # "Fernando" na RS-SMART - CAXIAS DO SUL) entrava na imagem/cobrança de um
     # técnico da matriz que só por coincidência tem o mesmo primeiro nome.
     try:
-        df_pendencias_tecnico_sem_bobina = excluir_bobina(df_pendencias)
+        df_pendencias_tecnico_sem_bobina = excluir_cartao_courier(excluir_bobina(df_pendencias))
         matriz_norm = normalizar_texto(MOBYAN_PRESTADOR_MATRIZ)
         df_pendencias_matriz = df_pendencias_tecnico_sem_bobina[
             df_pendencias_tecnico_sem_bobina["Prestador"].apply(normalizar_texto) == matriz_norm
