@@ -43,11 +43,6 @@ COR_AJUSTE_MANUAL = "F4B183"
 
 NOME_TECNICO_AJUSTE_MANUAL = "AJUSTE MANUAL"
 
-TECNICOS_PADRAO = [
-    "Adriano", "Emerson", "Fabio", "Fernando", "Gerson", "Geziel",
-    "Howard", "Johnny", "Leonardo", "Lucindo", "Matheus", "Vladimir",
-]
-
 
 def normalizar_texto(valor):
     if pd.isna(valor):
@@ -328,17 +323,6 @@ def roteirizar_linha(linha, regras, aliases, resolucoes_temporarias=None):
         regra_aplicada = "CIDADE + BAIRRO"
 
     candidatos = [c for c in candidatos if c]
-
-    # Regra validada: Leonardo não trabalha com Mobyan.
-    if origem == "MOBYAN" and "Leonardo" in candidatos:
-        candidatos = [c for c in candidatos if c != "Leonardo"]
-        if "Emerson" not in candidatos:
-            candidatos.append("Emerson")
-
-    # Nas áreas compartilhadas Emerson/Leonardo, o OGEA fica com Leonardo.
-    if origem == "OGEA" and "Leonardo" in candidatos:
-        candidatos = ["Leonardo"]
-
     candidatos = sorted(set(candidatos))
 
     if len(candidatos) == 1:
