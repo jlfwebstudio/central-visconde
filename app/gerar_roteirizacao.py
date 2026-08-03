@@ -17,6 +17,7 @@ from openpyxl.utils import get_column_letter
 
 from baixar_relatorios_roteirizacao import baixar_relatorios_automaticamente
 from gestao_rotas import garantir_estrutura_base
+import onedrive_excel
 
 
 from caminho_base import BASE_DIR
@@ -543,6 +544,18 @@ def gerar_planilha(df, regras, aliases, tecnicos):
         pd.DataFrame(matriz).to_excel(writer, index=False, sheet_name="Roteiro por Técnico")
 
     formatar_planilha(caminho_temp, df, tecnicos, origens_colunas)
+
+    # Espelha a aba "Roteiro por Técnico" numa planilha Excel Online (OneDrive) que
+    # o time operacional já usa pra acompanhar o dia — best-effort, nunca pode
+    # travar a geração da planilha local (ver app/onedrive_excel.py).
+    if onedrive_excel.esta_configurado():
+        try:
+            onedrive_excel.enviar_roteiro_dia(matriz, origens_colunas, tecnicos, datetime.now().date())
+            print("Planilha do OneDrive atualizada com sucesso.")
+        except onedrive_excel.PrecisaLoginError as erro:
+            print(f"Aviso: {erro}")
+        except Exception as erro:
+            print(f"Não consegui atualizar a planilha do OneDrive agora ({erro}). A roteirização local seguiu normalmente.")
 
     if ARQUIVO_ATUAL.exists():
         try:

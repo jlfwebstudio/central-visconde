@@ -40,7 +40,7 @@ ARQUIVO_WORKSPACE_ATIVO = PASTA_CONFIG / "workspace_ativo.json"
 # (sempre regenerado do zero a partir da config da conta em materializar_env)
 # nem backups/ (snapshots manuais do usuário, tratados como legado — ver
 # CLAUDE.md — e não amarrados a nenhuma conta específica).
-PASTAS_WORKSPACE = ("outputs", "downloads", "logs", "bases", "whatsapp_profile")
+PASTAS_WORKSPACE = ("outputs", "downloads", "logs", "bases", "whatsapp_profile", "onedrive_profile")
 
 BACKEND_URL = os.getenv(
     "VISCONDE_BACKEND_URL",
@@ -355,6 +355,8 @@ def materializar_env(config_conta):
         "MOBYAN_ESTADO",
         "OGEA_PRESTADOR",
         "MOBYAN_RELATORIO_USER",
+        "ONEDRIVE_CLIENT_ID",
+        "ONEDRIVE_ARQUIVO_CAMINHO",
     ):
         valor = config_extra.get(chave)
         if valor is None or valor == "":
@@ -829,6 +831,16 @@ class _JanelaConfiguracaoConta(_TelaFormulario):
         )
         self.campo_mobyan_relatorio_user.insert(0, self.config_atual.get("MOBYAN_RELATORIO_USER", ""))
 
+        self._secao("OneDrive / Excel Online (opcional)")
+        self.campo_onedrive_client_id = self._campo(
+            "Client ID do app registrado no Azure AD (só preencha se o suporte pedir)"
+        )
+        self.campo_onedrive_client_id.insert(0, self.config_atual.get("ONEDRIVE_CLIENT_ID", ""))
+        self.campo_onedrive_arquivo = self._campo(
+            "Nome do arquivo compartilhado no OneDrive (ex: Roteiro_2026)"
+        )
+        self.campo_onedrive_arquivo.insert(0, self.config_atual.get("ONEDRIVE_ARQUIVO_CAMINHO", ""))
+
         self._botao("Salvar alterações", self._salvar)
         self._link("Fechar sem salvar", self.root.destroy)
 
@@ -885,6 +897,13 @@ class _JanelaConfiguracaoConta(_TelaFormulario):
             config_extra["MOBYAN_ESTADO"] = estado_mobyan
         if relatorio_user_mobyan:
             config_extra["MOBYAN_RELATORIO_USER"] = relatorio_user_mobyan
+
+        client_id_onedrive = self.campo_onedrive_client_id.get().strip()
+        arquivo_onedrive = self.campo_onedrive_arquivo.get().strip()
+        if client_id_onedrive:
+            config_extra["ONEDRIVE_CLIENT_ID"] = client_id_onedrive
+        if arquivo_onedrive:
+            config_extra["ONEDRIVE_ARQUIVO_CAMINHO"] = arquivo_onedrive
 
         try:
             salvar_config(self.token, plataformas, config_extra)

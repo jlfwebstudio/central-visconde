@@ -5,6 +5,7 @@ backend/.venv/
 backend/.env
 backend/*.db
 whatsapp_profile/
+onedrive_profile/
 downloads/
 logs/
 __pycache__/
