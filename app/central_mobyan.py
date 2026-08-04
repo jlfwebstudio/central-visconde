@@ -303,42 +303,58 @@ class ActionCard(tk.Frame):
 
 
 class SmallButton(tk.Frame):
-    def __init__(self, master, texto, comando, largura=170, altura=42):
+    def __init__(self, master, icone, texto, comando):
         super().__init__(master, bg=COR_FUNDO_2)
         self.comando = comando
         self.container = tk.Frame(
             self,
             bg=COR_CARD,
-            height=altura,
-            width=largura,
             cursor="hand2",
             highlightbackground=COR_BORDA,
             highlightthickness=1,
         )
         self.container.pack(fill="both", expand=True)
-        self.container.pack_propagate(False)
+        self.faixa = tk.Frame(self.container, bg=COR_DOURADO, height=3)
+        self.faixa.pack(fill="x")
+        self.conteudo = tk.Frame(self.container, bg=COR_CARD)
+        self.conteudo.pack(padx=16, pady=11)
+        self.icone = tk.Label(
+            self.conteudo,
+            text=icone,
+            bg=COR_CARD,
+            font=("Arial", 14),
+            cursor="hand2",
+        )
+        if icone:
+            self.icone.pack(side="left", padx=(0, 9))
         self.label = tk.Label(
-            self.container,
+            self.conteudo,
             text=texto,
             bg=COR_CARD,
             fg=COR_BRANCO,
-            font=("Arial", 9, "bold"),
+            font=("Arial", 10, "bold"),
             cursor="hand2",
-            wraplength=largura - 16,
-            justify="center",
+            justify="left",
+            anchor="w",
         )
-        self.label.pack(expand=True)
-        for widget in [self.container, self.label]:
+        self.label.pack(side="left")
+        for widget in [self.container, self.conteudo, self.icone, self.label]:
             widget.bind("<Button-1>", lambda event: self.comando())
             widget.bind("<Enter>", self.entrar)
             widget.bind("<Leave>", self.sair)
 
     def entrar(self, event=None):
+        self.faixa.config(bg=COR_DOURADO_HOVER)
         self.container.config(bg=COR_CARD_HOVER)
+        self.conteudo.config(bg=COR_CARD_HOVER)
+        self.icone.config(bg=COR_CARD_HOVER)
         self.label.config(bg=COR_CARD_HOVER, fg=COR_DOURADO)
 
     def sair(self, event=None):
+        self.faixa.config(bg=COR_DOURADO)
         self.container.config(bg=COR_CARD)
+        self.conteudo.config(bg=COR_CARD)
+        self.icone.config(bg=COR_CARD)
         self.label.config(bg=COR_CARD, fg=COR_BRANCO)
 
 
@@ -678,11 +694,11 @@ class CentralVisconde:
         self.botoes_processo.append(botao)
         return botao
 
-    def criar_atalhos(self, master, itens, largura=134, altura=68):
+    def criar_atalhos(self, master, itens):
         linha = tk.Frame(master, bg=COR_FUNDO_2)
-        for idx, (rotulo, comando) in enumerate(itens):
-            botao = SmallButton(linha, rotulo, comando, largura=largura, altura=altura)
-            botao.grid(row=0, column=idx, padx=(0 if idx == 0 else 8, 0), sticky="w")
+        for idx, (icone, rotulo, comando) in enumerate(itens):
+            botao = SmallButton(linha, icone, rotulo, comando)
+            botao.grid(row=0, column=idx, padx=(0 if idx == 0 else 10, 0), sticky="w")
         return linha
 
     def criar_pagina_inicio(self):
@@ -710,19 +726,12 @@ class CentralVisconde:
         self.criar_atalhos(
             pagina,
             [
-                ("Abrir\nPendências", self.abrir_planilha),
-                ("Abrir\nRoteirização", self.abrir_roteirizacao),
-                ("Abrir\nRoteiros PDF", self.abrir_pasta_pdfs),
-                ("Abrir Gestão\nde Rotas", self.abrir_gestao_rotas),
+                ("📋", "Abrir Pendências", self.abrir_planilha),
+                ("🗺️", "Abrir Roteirização", self.abrir_roteirizacao),
+                ("📄", "Abrir Roteiros PDF", self.abrir_pasta_pdfs),
+                ("⚙️", "Abrir Gestão de Rotas", self.abrir_gestao_rotas),
             ],
         ).pack(anchor="w", pady=(2, 12))
-
-        self.adicionar_painel_info(
-            pagina,
-            "Como funciona esse painel",
-            "Os números acima vêm da última planilha de pendências gerada (\"Gerar Pendências\"), sempre desconsiderando envios de bobina, que não contam no SLA mensal: quantas OSs vencem hoje, qual prestador concentra o maior volume de vencimentos hoje e quantas OSs já estão críticas, com 5 dias de atraso ou mais. Gere as pendências de novo ou use \"Atualizar Resumos\" para recalcular.",
-            altura=110,
-        )
 
     def criar_pagina_operacao(self):
         pagina = self.nova_pagina("operacao")
@@ -743,16 +752,10 @@ class CentralVisconde:
         self.criar_atalhos(
             pagina,
             [
-                ("Abrir\nPendências", self.abrir_planilha),
-                ("Atualizar\nResumo", self.atualizar_resumos),
+                ("📋", "Abrir Pendências", self.abrir_planilha),
+                ("🔄", "Atualizar Resumo", self.atualizar_resumos),
             ],
         ).pack(anchor="w", pady=(8, 0))
-
-        self.adicionar_painel_info(
-            pagina,
-            "Fluxo operacional",
-            "1. Gere as pendências.  2. Vá em WhatsApp pra revisar e enviar a cobrança do dia.",
-        )
 
     def criar_pagina_whatsapp(self):
         pagina = self.nova_pagina("whatsapp")
@@ -786,16 +789,10 @@ class CentralVisconde:
         self.criar_atalhos(
             pagina,
             [
-                ("Abrir\nAcompanhamento", self.abrir_acompanhamento),
-                ("Abrir\nImagens", self.abrir_pasta_imagens),
+                ("📊", "Abrir Acompanhamento", self.abrir_acompanhamento),
+                ("🖼️", "Abrir Imagens", self.abrir_pasta_imagens),
             ],
         ).pack(anchor="w", pady=(4, 0))
-
-        self.adicionar_painel_info(
-            pagina,
-            "Fluxo de envio",
-            "1. Cadastre o WhatsApp de cada base em Configurar Contatos (uma vez só).  2. Revise Acompanhamento e Envios.  3. Marque só as bases prontas.  4. Envie pelo WhatsApp.",
-        )
 
     def criar_pagina_roteiros(self):
         pagina = self.nova_pagina("roteiros")
@@ -829,9 +826,9 @@ class CentralVisconde:
         self.criar_atalhos(
             pagina,
             [
-                ("Abrir\nRoteirização", self.abrir_roteirizacao),
-                ("Abrir\nRoteiros PDF", self.abrir_pasta_pdfs),
-                ("Abrir base\nde regras", self.abrir_base_rotas),
+                ("🗺️", "Abrir Roteirização", self.abrir_roteirizacao),
+                ("📄", "Abrir Roteiros PDF", self.abrir_pasta_pdfs),
+                ("📚", "Abrir base de regras", self.abrir_base_rotas),
             ],
         ).pack(anchor="w", pady=(0, 18))
 
@@ -888,10 +885,9 @@ class CentralVisconde:
         self.criar_atalhos(
             pagina,
             [
-                ("Abrir última\nanálise", self.abrir_analise_abonos),
-                ("Abrir pasta\nde abonos", self.abrir_pasta_abonos),
+                ("📈", "Abrir última análise", self.abrir_analise_abonos),
+                ("📁", "Abrir pasta de abonos", self.abrir_pasta_abonos),
             ],
-            altura=58,
         ).pack(anchor="w", pady=(8, 0))
 
         self.adicionar_painel_info(
@@ -922,12 +918,11 @@ class CentralVisconde:
         self.criar_atalhos(
             pagina,
             [
-                ("Abrir\nProjeto", self.abrir_pasta_projeto),
-                ("Abrir\nLogs", self.abrir_pasta_logs),
-                ("Abrir\nPDFs", self.abrir_pasta_pdfs),
-                ("Atualizar\nResumos", self.atualizar_resumos),
+                ("🗂️", "Abrir Projeto", self.abrir_pasta_projeto),
+                ("🧾", "Abrir Logs", self.abrir_pasta_logs),
+                ("📄", "Abrir PDFs", self.abrir_pasta_pdfs),
+                ("🔄", "Atualizar Resumos", self.atualizar_resumos),
             ],
-            altura=58,
         ).pack(anchor="w")
 
     def adicionar_painel_info(self, master, titulo, texto, altura=110):
@@ -1396,7 +1391,7 @@ class CentralVisconde:
 
         ActionCard(container, "Mensagem da Manhã", "Primeiro envio do dia com cobrança das vencidas.", lambda: selecionar("manha"), COR_AZUL, COR_AZUL_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
         ActionCard(container, "Acompanhamento", "Atualização das pendências ao longo do dia.", lambda: selecionar("acompanhamento"), COR_VERDE, COR_VERDE_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
-        SmallButton(container, "Cancelar", lambda: selecionar(None), largura=510).pack(fill="x", pady=(8, 0))
+        SmallButton(container, "", "Cancelar", lambda: selecionar(None)).pack(fill="x", pady=(8, 0))
         janela.wait_window()
         return escolha["valor"]
 
@@ -1426,7 +1421,7 @@ class CentralVisconde:
 
         ActionCard(container, "Bases", "Cobrança do dia pelos prestadores cadastrados.", lambda: selecionar("bases"), COR_AZUL, COR_AZUL_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
         ActionCard(container, "Técnicos RS-SMART", "Lembrete individual pras rotas de cada técnico.", lambda: selecionar("tecnicos"), COR_VERDE, COR_VERDE_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
-        SmallButton(container, "Cancelar", lambda: selecionar(None), largura=510).pack(fill="x", pady=(8, 0))
+        SmallButton(container, "", "Cancelar", lambda: selecionar(None)).pack(fill="x", pady=(8, 0))
         janela.wait_window()
         return escolha["valor"]
 
