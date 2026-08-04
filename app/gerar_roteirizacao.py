@@ -473,7 +473,7 @@ def criar_mapa_contratante_mobyan(df):
     return mobyan.reset_index(drop=True)
 
 
-def gerar_planilha(df, regras, aliases, tecnicos):
+def gerar_planilha(df, regras, aliases, tecnicos, publicar_onedrive=False):
     PASTA_SAIDA.mkdir(parents=True, exist_ok=True)
 
     indicadores, resumo_tecnicos = montar_resumo(df, tecnicos)
@@ -531,8 +531,13 @@ def gerar_planilha(df, regras, aliases, tecnicos):
 
     # Espelha a aba "Roteiro por Técnico" numa planilha Excel Online (OneDrive) que
     # o time operacional já usa pra acompanhar o dia — best-effort, nunca pode
-    # travar a geração da planilha local (ver app/onedrive_excel.py).
-    if onedrive_excel.esta_configurado():
+    # travar a geração da planilha local (ver app/onedrive_excel.py). Só roda
+    # quando publicar_onedrive=True, isto é, quando o usuário clicou no botão
+    # "Gerar Roteirização" da tela principal — reprocessamentos disparados pela
+    # Gestão de Rotas (editar técnico/regra/alias, resolver pendência) nunca
+    # tocam a planilha online, pra não bagunçar a visão do time operacional a
+    # cada pequeno ajuste interno.
+    if publicar_onedrive and onedrive_excel.esta_configurado():
         try:
             onedrive_excel.enviar_roteiro_dia(matriz, origens_colunas, tecnicos, datetime.now().date())
             print("Planilha do OneDrive atualizada com sucesso.")
@@ -805,6 +810,11 @@ def main():
     parser.add_argument("--sem-abrir", action="store_true", help="Não abre o Excel ao terminar")
     parser.add_argument("--reprocessar-atual", action="store_true", help="Reusa os últimos relatórios baixados")
     parser.add_argument("--usar-resolucoes-temporarias", action="store_true", help="Aplica decisões válidas somente para este roteiro")
+    parser.add_argument(
+        "--publicar-onedrive",
+        action="store_true",
+        help="Espelha o Roteiro por Técnico na planilha Excel Online (só usado pelo botão Gerar Roteirização da tela principal)",
+    )
     args = parser.parse_args()
 
     if args.mobyan and args.ogea:
@@ -827,7 +837,7 @@ def main():
         caminho_mobyan, caminho_ogea,
         usar_resolucoes_temporarias=args.usar_resolucoes_temporarias,
     )
-    atual = gerar_planilha(df, regras, aliases, tecnicos)
+    atual = gerar_planilha(df, regras, aliases, tecnicos, publicar_onedrive=args.publicar_onedrive)
 
     if args.usar_resolucoes_temporarias and ARQUIVO_RESOLUCOES_TEMPORARIAS.exists():
         try:

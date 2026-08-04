@@ -1316,7 +1316,7 @@ class CentralVisconde:
             SCRIPT_GERAR_ROTEIRIZACAO,
             "Gerar Roteirização",
             "Roteirização criada com sucesso.",
-            argumentos=["--sem-abrir"],
+            argumentos=["--sem-abrir", "--publicar-onedrive"],
         )
 
     def gerar_pdfs(self):
