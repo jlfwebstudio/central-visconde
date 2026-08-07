@@ -43,6 +43,7 @@ from autenticacao import (
 from caminho_base import BASE_DIR, FROZEN, RECURSOS_DIR
 
 SCRIPT_GERAR_PENDENCIAS = RECURSOS_DIR / "app" / "exportador_mobyan.py"
+SCRIPT_CALCULADORA_SLA = RECURSOS_DIR / "app" / "calculadora_sla_mobyan.py"
 SCRIPT_ENVIAR_WHATSAPP = RECURSOS_DIR / "app" / "enviar_whatsapp.py"
 SCRIPT_GERAR_ROTEIRIZACAO = RECURSOS_DIR / "app" / "gerar_roteirizacao.py"
 SCRIPT_GERAR_PDFS = RECURSOS_DIR / "app" / "gerar_pdfs.py"
@@ -50,6 +51,7 @@ SCRIPT_ANALISAR_ABONOS = RECURSOS_DIR / "app" / "analisar_abonos_ogea.py"
 SCRIPT_GERAR_OS_VISCONDE_TESTE = RECURSOS_DIR / "app" / "gerar_os_visconde_teste.py"
 
 ARQUIVO_PLANILHA = BASE_DIR / "outputs" / "pendencias_do_dia" / "pendencias_do_dia_atual.xlsx"
+ARQUIVO_SLA_MOBYAN = BASE_DIR / "outputs" / "calculadora_sla" / "sla_mobyan_atual.xlsx"
 PASTA_FILTROS_PAINEL = BASE_DIR / "outputs" / "pendencias_do_dia" / "filtros_painel"
 ARQUIVO_ROTEIRIZACAO = BASE_DIR / "outputs" / "roteirizacao" / "roteirizacao_atual.xlsx"
 ARQUIVO_ABONOS = BASE_DIR / "outputs" / "abonos_ogea" / "analise_abonos_ogea_atual.xlsx"
@@ -744,15 +746,29 @@ class CentralVisconde:
             self.gerar_pendencias,
             COR_AZUL,
             COR_AZUL_HOVER,
-            largura=LARGURA_CARD_CHEIO,
-            altura=ALTURA_CARD_CHEIO,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
         ))
-        b1.pack(fill="x")
+        b1.grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        b2 = self.registrar_action(ActionCard(
+            acoes,
+            "Calculadora SLA Mobyan",
+            "Baixa o relatório de OS do mês e calcula o SLA (no prazo x atraso) automaticamente.",
+            self.calcular_sla_mobyan,
+            COR_DOURADO,
+            COR_DOURADO_HOVER,
+            largura=LARGURA_CARD_PAR,
+            altura=ALTURA_CARD_PAR,
+        ))
+        b2.grid(row=0, column=1, padx=(8, 0), sticky="ew")
+        acoes.grid_columnconfigure(0, weight=1)
+        acoes.grid_columnconfigure(1, weight=1)
 
         self.criar_atalhos(
             pagina,
             [
                 ("📋", "Abrir Pendências", self.abrir_planilha),
+                ("📈", "Abrir SLA Mobyan", self.abrir_sla_mobyan),
                 ("🔄", "Atualizar Resumo", self.atualizar_resumos),
             ],
         ).pack(anchor="w", pady=(8, 0))
@@ -1309,6 +1325,13 @@ class CentralVisconde:
     def gerar_pendencias(self):
         self.rodar_script(SCRIPT_GERAR_PENDENCIAS, "Gerar Pendências", "Planilha de pendências criada com sucesso.")
 
+    def calcular_sla_mobyan(self):
+        self.rodar_script(
+            SCRIPT_CALCULADORA_SLA,
+            "Calculadora SLA Mobyan",
+            "Planilha de SLA gerada com sucesso.",
+        )
+
     def gerar_roteirizacao(self):
         # A planilha permanece fechada durante a validação das rotas. Se não
         # houver pendências, ela será aberta ao final por esta própria Central.
@@ -1533,6 +1556,12 @@ class CentralVisconde:
             abrir_caminho(ARQUIVO_PLANILHA)
         else:
             messagebox.showwarning("Planilha não encontrada", "A planilha ainda não foi criada.")
+
+    def abrir_sla_mobyan(self):
+        if ARQUIVO_SLA_MOBYAN.exists():
+            abrir_caminho(ARQUIVO_SLA_MOBYAN)
+        else:
+            messagebox.showwarning("Planilha não encontrada", "A calculadora de SLA ainda não foi gerada.")
 
     def montar_filtro_pendencias(self, modo, prestador=None):
         if modo == "prestador_top" and not prestador:
