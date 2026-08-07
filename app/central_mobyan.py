@@ -520,6 +520,7 @@ class CentralVisconde:
             ("whatsapp", "WhatsApp"),
             ("roteiros", "Roteiros"),
             ("ferramentas", "Abonos"),
+            ("logs", "Logs"),
         ]
         for chave, texto in itens:
             botao = NavButton(self.sidebar, texto, lambda c=chave: self.mostrar_pagina(c))
@@ -605,9 +606,10 @@ class CentralVisconde:
         self.criar_pagina_whatsapp()
         self.criar_pagina_roteiros()
         self.criar_pagina_ferramentas()
+        self.criar_pagina_logs()
 
         status_frame = tk.Frame(self.main, bg=COR_FUNDO_2)
-        status_frame.pack(fill="x", padx=26, pady=(0, 8))
+        status_frame.pack(fill="x", padx=26, pady=(0, 18))
         self.status = tk.Label(
             status_frame,
             text="Status: aguardando ação...",
@@ -616,35 +618,41 @@ class CentralVisconde:
             font=("Arial", 11, "bold"),
             anchor="w",
         )
-        self.status.pack(fill="x")
+        self.status.pack(side="left", fill="x")
+        link_logs = tk.Label(
+            status_frame,
+            text="Ver log completo →",
+            bg=COR_FUNDO_2,
+            fg=COR_TEXTO_FRACO,
+            font=("Arial", 9, "underline"),
+            cursor="hand2",
+        )
+        link_logs.pack(side="right")
+        link_logs.bind("<Button-1>", lambda _evento: self.mostrar_pagina("logs"))
+
+        self.escrever_log("ViscondeApp iniciado.\n")
+        self.escrever_log("Escolha uma área no menu lateral.\n")
+
+    def nova_pagina_fixa(self, chave):
+        """Como nova_pagina, mas sem canvas/scroll — usado pra páginas cujo
+        próprio conteúdo já rola sozinho (ex: Logs, com um Text widget)."""
+        wrapper = tk.Frame(self.page_host, bg=COR_FUNDO_2)
+        wrapper.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.paginas[chave] = wrapper
+        return wrapper
+
+    def criar_pagina_logs(self):
+        pagina = self.nova_pagina_fixa("logs")
 
         log_container = tk.Frame(
-            self.main,
+            pagina,
             bg=COR_CARD,
-            height=240,
             highlightbackground=COR_BORDA,
             highlightthickness=1,
         )
-        log_container.pack(fill="both", padx=26, pady=(0, 18))
-        log_container.pack_propagate(False)
-        log_header = tk.Frame(log_container, bg=COR_CARD)
-        log_header.pack(fill="x", padx=12, pady=(8, 0))
-        tk.Label(
-            log_header,
-            text="Log da automação",
-            bg=COR_CARD,
-            fg=COR_DOURADO,
-            font=("Arial", 10, "bold"),
-        ).pack(side="left")
-        tk.Label(
-            log_header,
-            text="Os processos continuam visíveis aqui em qualquer tela.",
-            bg=COR_CARD,
-            fg=COR_TEXTO_FRACO,
-            font=("Arial", 9),
-        ).pack(side="right")
+        log_container.pack(fill="both", expand=True, pady=(2, 0))
         log_frame = tk.Frame(log_container, bg=COR_CARD)
-        log_frame.pack(fill="both", expand=True, padx=12, pady=(6, 12))
+        log_frame.pack(fill="both", expand=True, padx=12, pady=12)
         self.log_text = tk.Text(
             log_frame,
             bg="#050505",
@@ -660,8 +668,6 @@ class CentralVisconde:
         scroll = tk.Scrollbar(log_frame, command=self.log_text.yview)
         scroll.pack(side="right", fill="y")
         self.log_text.config(yscrollcommand=scroll.set)
-        self.escrever_log("ViscondeApp iniciado.\n")
-        self.escrever_log("Escolha uma área no menu lateral.\n")
 
     def nova_pagina(self, chave):
         """Cria uma página rolável: cada seção pode crescer sem sobrepor o rodapé."""
@@ -978,6 +984,7 @@ class CentralVisconde:
             "whatsapp": ("WhatsApp", "Envio das pendências e cadastro dos contatos de cada base."),
             "roteiros": ("Roteiros", "Roteirização, ajuste de rotas e geração dos PDFs por técnico."),
             "ferramentas": ("Abonos", "Analista de abonos OGEA e acesso a arquivos e logs do sistema."),
+            "logs": ("Logs", "Saída completa da automação em execução (ou da última rodada)."),
         }
         for nome, pagina in self.paginas.items():
             if nome == chave:
