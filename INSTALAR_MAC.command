@@ -5,7 +5,7 @@ SOURCE_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 TARGET_DIR="$HOME/mobyan-automacoes"
 
 echo "================================================================"
-echo "       INSTALAÇÃO DA CENTRAL MOBYAN - macOS / Apple Silicon"
+echo "       INSTALAÇÃO DO VISCONDEAPP - macOS / Apple Silicon"
 echo "================================================================"
 echo
 
@@ -125,7 +125,7 @@ mkdir -p \
     whatsapp_profile
 
 # Cria um aplicativo local sem assinatura, evitando depender do Terminal no uso diário.
-APP_DIR="$HOME/Applications/Central Mobyan.app"
+APP_DIR="$HOME/Applications/ViscondeApp.app"
 mkdir -p "$APP_DIR/Contents/MacOS"
 cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -133,11 +133,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>Central Mobyan</string>
+    <string>ViscondeApp</string>
     <key>CFBundleIdentifier</key>
-    <string>br.local.centralmobyan</string>
+    <string>br.com.visconde.central</string>
     <key>CFBundleName</key>
-    <string>Central Mobyan</string>
+    <string>ViscondeApp</string>
+    <key>CFBundleDisplayName</key>
+    <string>ViscondeApp</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
@@ -147,7 +149,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-cat > "$APP_DIR/Contents/MacOS/Central Mobyan" <<'APP'
+cat > "$APP_DIR/Contents/MacOS/ViscondeApp" <<'APP'
 #!/bin/bash
 PROJECT_DIR="$HOME/mobyan-automacoes"
 cd "$PROJECT_DIR" || exit 1
@@ -156,10 +158,10 @@ export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
 nohup "$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/app/central_mobyan.py" >> "$PROJECT_DIR/logs/central_mobyan.log" 2>&1 &
 APP
-chmod +x "$APP_DIR/Contents/MacOS/Central Mobyan"
+chmod +x "$APP_DIR/Contents/MacOS/ViscondeApp"
 mkdir -p "$HOME/Applications"
 if [ -d "$HOME/Desktop" ]; then
-    ln -sfn "$APP_DIR" "$HOME/Desktop/Central Mobyan.app"
+    ln -sfn "$APP_DIR" "$HOME/Desktop/ViscondeApp.app"
 fi
 
 if [ ! -f ".env" ]; then
@@ -190,9 +192,9 @@ fi
 
 echo
 echo "================================================================"
-echo "        CENTRAL MOBYAN INSTALADA COM SUCESSO NO MAC"
+echo "        VISCONDEAPP INSTALADO COM SUCESSO NO MAC"
 echo "================================================================"
-echo "Abra pelo aplicativo Central Mobyan na Mesa ou em Aplicativos."
+echo "Abra pelo aplicativo ViscondeApp na Mesa ou em Aplicativos."
 echo
 open "$APP_DIR"
 read -r -p "Pressione Enter para fechar o instalador..."
