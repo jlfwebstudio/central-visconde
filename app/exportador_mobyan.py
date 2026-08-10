@@ -1683,28 +1683,6 @@ def ler_tecnicos_whatsapp():
     return df
 
 
-# Bloco de opções compartilhado pelas mensagens de base e de técnico (manhã e
-# acompanhamento) — evita 4 cópias do mesmo texto derivando com o tempo.
-BLOCO_OPCOES_RESPOSTA = (
-    "1 - Em rota / será atendida hoje\n"
-    "2 - Atendimento confirmado com horário\n"
-    "3 - Em atendimento\n"
-    "4 - Atendido, aguardando baixa no sistema\n"
-    "5 - Cliente indisponível\n"
-    "6 - Sem técnico\n"
-    "7 - Sem equipamento/material\n"
-    "8 - Vai atrasar\n"
-    "9 - Precisa abonar"
-)
-
-BLOCO_EXEMPLO_RESPOSTA = (
-    "Pode responder assim:\n"
-    "OS 123456 - opção 1\n"
-    "OS 123457 - opção 2, previsão 14h\n"
-    "OS 123458 - opção 8, previsão amanhã"
-)
-
-
 def criar_mensagem_envio(responsavel, prestador, total_pendencias, vencidas, vence_hoje, nivel_cobranca="NORMAL"):
     nome = responsavel.strip() if not valor_vazio(responsavel) else ""
 
@@ -1736,12 +1714,9 @@ def criar_mensagem_envio(responsavel, prestador, total_pendencias, vencidas, ven
 
     mensagem = (
         f"{saudacao}\n\n"
-        f"Segue pendências da base {prestador}.\n\n"
-        f"Temos {resumo}. Preciso do retorno operacional para evitar atraso no SLA."
-        f"{aviso_critico}\n\n"
-        "Por favor, responda cada OS com uma das opções abaixo:\n"
-        f"{BLOCO_OPCOES_RESPOSTA}\n\n"
-        f"{BLOCO_EXEMPLO_RESPOSTA}"
+        f"Base {prestador}: temos {resumo}. Tudo certo para todas serem atendidas hoje?\n\n"
+        "Se alguma for atrasar, preciso do motivo e da previsão de atendimento. Não podemos ter atraso."
+        f"{aviso_critico}"
     )
 
     return mensagem
@@ -1778,12 +1753,9 @@ def criar_mensagem_acompanhamento(responsavel, prestador, total_pendencias, venc
 
     mensagem = (
         f"{saudacao}\n\n"
-        f"Segue atualização das pendências da base {prestador}.\n\n"
-        f"Ainda temos {resumo}.{aviso_critico}\n\n"
-        "Me atualiza, por favor, quais OSs já estão controladas e quais têm risco de atraso.\n\n"
-        "Use as opções abaixo para facilitar:\n"
-        f"{BLOCO_OPCOES_RESPOSTA}\n\n"
-        "Se tiver OS que vai atrasar, já me manda a previsão e o motivo."
+        f"Base {prestador}: ainda temos {resumo} em aberto."
+        f"{aviso_critico}\n\n"
+        "Tá tudo certo pra serem atendidas ainda hoje? Cobra os técnicos, por favor."
     )
 
     return mensagem
