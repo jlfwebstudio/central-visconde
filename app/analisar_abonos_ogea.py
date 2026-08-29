@@ -65,6 +65,46 @@ PADROES_APENAS_DIAS_UTEIS = [
     r"\bSOMENTE\s+(?:DE\s+)?SEGUNDA(?: FEIRA)?\s+(?:A|ATE)\s+SEXTA(?: FEIRA)?\b",
 ]
 
+# Frases que indicam atendimento em todos os dias da semana, sem citar
+# "sábado" explicitamente — o sábado entra na conta automaticamente.
+PADROES_TODOS_OS_DIAS = [
+    r"\bTODOS\s+OS\s+DIAS\b",
+    r"\bTODO\s+DIA\b",
+    r"\b7\s*DIAS\s*(?:POR|NA)?\s*SEMANA\b",
+    r"\bFUNCIONAMENTO\s+DIARIO\b",
+    r"\bATENDIMENTO\s+DIARIO\b",
+]
+PADROES_ABRE.extend(PADROES_TODOS_OS_DIAS)
+
+# Nomes de dia da semana e sua ordem (semana começando na segunda). Usado
+# para decidir se um intervalo "de X a Y" (ex.: "DE TERCA A DOMINGO") inclui
+# o sábado mesmo quando a palavra "SABADO" não aparece literalmente no campo.
+DIAS_SEMANA_ORDEM = {
+    "SEGUNDA": 0,
+    "TERCA": 1,
+    "QUARTA": 2,
+    "QUINTA": 3,
+    "SEXTA": 4,
+    "SABADO": 5,
+    "DOMINGO": 6,
+}
+_REGEX_NOME_DIA = r"(SEGUNDA|TERCA|QUARTA|QUINTA|SEXTA|SABADO|DOMINGO)(?:\s*FEIRA)?"
+PADRAO_INTERVALO_DIAS = re.compile(
+    rf"\b(?:DE\s+)?{_REGEX_NOME_DIA}\s+(?:A|ATE)\s+{_REGEX_NOME_DIA}\b"
+)
+
+
+def intervalo_dias_inclui_sabado(dia_inicio, dia_fim):
+    """Diz se o sábado está contido no intervalo "dia_inicio a dia_fim",
+    incluindo intervalos que cruzam a virada da semana (ex.: sexta a
+    segunda)."""
+    idx_inicio = DIAS_SEMANA_ORDEM[dia_inicio]
+    idx_fim = DIAS_SEMANA_ORDEM[dia_fim]
+    idx_sabado = DIAS_SEMANA_ORDEM["SABADO"]
+    if idx_inicio <= idx_fim:
+        return idx_inicio <= idx_sabado <= idx_fim
+    return idx_sabado >= idx_inicio or idx_sabado <= idx_fim
+
 COLUNAS_SAIDA = [
     "Decisão",
     "Confiança",
@@ -288,12 +328,18 @@ def capturar_campos_relevantes(linha):
         if not valor_txt or valor_txt.lower() in {"nan", "none", "null"}:
             continue
         combinado = normalizar_texto(f"{coluna} {valor_txt}")
+        intervalo = PADRAO_INTERVALO_DIAS.search(combinado)
+        intervalo_inclui_sabado = bool(
+            intervalo and intervalo_dias_inclui_sabado(intervalo.group(1), intervalo.group(2))
+        )
         if (
             "SAB" in combinado
             or "SEGUNDA A SEXTA" in combinado
             or "SEG A SEX" in combinado
             or "SEGUNDA A SABADO" in combinado
             or "SEG A SAB" in combinado
+            or intervalo_inclui_sabado
+            or any(re.search(padrao, combinado) for padrao in PADROES_TODOS_OS_DIAS)
         ):
             relevantes.append(f"{coluna}: {valor_txt}")
     return relevantes
@@ -344,6 +390,11 @@ def analisar_linha(linha, regras):
             if re.search(padrao, campo_norm):
                 dias_uteis_evidencias.append(campo_original)
                 break
+
+        if not negativa_explicita:
+            intervalo = PADRAO_INTERVALO_DIAS.search(valor_norm)
+            if intervalo and intervalo_dias_inclui_sabado(intervalo.group(1), intervalo.group(2)):
+                abre_evidencias.append(campo_original)
 
         for padrao in PADROES_ABRE:
             if re.search(padrao, campo_norm) and not negativa_explicita:
