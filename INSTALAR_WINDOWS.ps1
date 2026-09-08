@@ -7,14 +7,25 @@
 # outro lugar -- diferente do instalador do Mac, aqui o git ja cuida de
 # manter a pasta certa.
 
-$ErrorActionPreference = "Stop"
+# Nao usamos $ErrorActionPreference = "Stop" aqui: no PowerShell 5.1 (o do
+# Windows), isso faz qualquer saida no stderr de um programa externo (py.exe,
+# pip, etc.) virar erro fatal, mesmo redirecionada com "2>$null". Os passos
+# criticos abaixo checam o resultado explicitamente (throw / exit) em vez de
+# depender dessa preferencia.
+$ErrorActionPreference = "Continue"
+
+Set-Location $PSScriptRoot
+
+New-Item -ItemType Directory -Force -Path "logs" | Out-Null
+$ArquivoLog = "logs\instalacao_windows_{0}.log" -f (Get-Date -Format "yyyy-MM-dd_HH-mm-ss")
+Start-Transcript -Path $ArquivoLog | Out-Null
+
+try {
 
 Write-Host "================================================================"
 Write-Host "       INSTALACAO DA CENTRAL VISCONDE - Windows"
 Write-Host "================================================================"
 Write-Host ""
-
-Set-Location $PSScriptRoot
 
 # Localiza um Python utilizavel (prefere o launcher "py", que normalmente
 # ja aponta pra versao mais recente instalada).
@@ -49,6 +60,7 @@ Write-Host ""
 Write-Host "[1/4] Criando ambiente virtual (.venv)..."
 if (-not (Test-Path ".venv")) {
     & $PythonCmd -m venv .venv
+    if ($LASTEXITCODE -ne 0) { throw "Criacao do .venv falhou (codigo $LASTEXITCODE)." }
 } else {
     Write-Host "Ja existe um .venv, mantendo o atual."
 }
@@ -58,11 +70,14 @@ $VenvPython = ".\.venv\Scripts\python.exe"
 Write-Host ""
 Write-Host "[2/4] Atualizando pip e instalando as dependencias..."
 & $VenvPython -m pip install --upgrade pip setuptools wheel
+if ($LASTEXITCODE -ne 0) { throw "Atualizacao do pip falhou (codigo $LASTEXITCODE)." }
 & $VenvPython -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "Instalacao das dependencias (requirements.txt) falhou (codigo $LASTEXITCODE)." }
 
 Write-Host ""
 Write-Host "[3/4] Instalando o Chromium do Playwright..."
 & $VenvPython -m playwright install chromium
+if ($LASTEXITCODE -ne 0) { throw "Instalacao do Chromium do Playwright falhou (codigo $LASTEXITCODE)." }
 
 Write-Host ""
 Write-Host "[4/4] Criando pastas de trabalho..."
@@ -118,3 +133,21 @@ Write-Host "        CENTRAL VISCONDE INSTALADA COM SUCESSO NO WINDOWS"
 Write-Host "================================================================"
 Write-Host "Use o INICIAR_CENTRAL_WINDOWS.bat para abrir a Central."
 Read-Host "Pressione Enter para fechar"
+
+}
+catch {
+    Write-Host ""
+    Write-Host "================================================================" -ForegroundColor Red
+    Write-Host "ERRO DURANTE A INSTALACAO" -ForegroundColor Red
+    Write-Host "================================================================" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host $_.ScriptStackTrace
+    Write-Host ""
+    Write-Host "Detalhes completos foram salvos em: $ArquivoLog"
+    Write-Host "Envie esse arquivo para quem estiver te ajudando com a instalacao."
+    Read-Host "Pressione Enter para fechar"
+}
+finally {
+    Stop-Transcript | Out-Null
+}
