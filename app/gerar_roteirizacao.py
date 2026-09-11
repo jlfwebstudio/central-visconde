@@ -44,6 +44,21 @@ COR_AJUSTE_MANUAL = "F4B183"
 NOME_TECNICO_AJUSTE_MANUAL = "AJUSTE MANUAL"
 
 
+def _tecnicos_com_espacador(tecnicos):
+    """Insere uma coluna em branco entre o último técnico de campo e o
+
+    "Ajuste Manual", só usado nas planilhas onde cada técnico vira uma
+    coluna lado a lado (Roteiro por Técnico local e a planilha do OneDrive).
+    """
+    indices = [
+        i for i, t in enumerate(tecnicos) if t.strip().upper() == NOME_TECNICO_AJUSTE_MANUAL
+    ]
+    if not indices or indices[0] == 0:
+        return tecnicos
+    indice = indices[0]
+    return tecnicos[:indice] + [""] + tecnicos[indice:]
+
+
 def normalizar_texto(valor):
     if pd.isna(valor):
         return ""
@@ -230,6 +245,10 @@ def ler_regras():
             keep_default_na=False,
             na_filter=False,
         )
+        if "Ativo" in tecnicos_df.columns:
+            tecnicos_df = tecnicos_df[
+                tecnicos_df["Ativo"].map(normalizar_texto).isin(["SIM", "S", "YES", "Y"])
+            ]
         tecnicos = [
             str(v).strip()
             for v in tecnicos_df.get("Técnico", pd.Series(dtype=str)).tolist()
@@ -240,6 +259,13 @@ def ler_regras():
 
     if not tecnicos:
         tecnicos = sorted(regras["Técnico"].astype(str).str.strip().replace("", pd.NA).dropna().unique())
+
+    # "Ajuste Manual" é a gaveta de OSs fora da área de atendimento, não um
+    # técnico de campo — sempre por último, depois de todos os técnicos reais.
+    nomes_ajuste = [t for t in tecnicos if t.strip().upper() == NOME_TECNICO_AJUSTE_MANUAL]
+    if nomes_ajuste:
+        tecnicos = [t for t in tecnicos if t.strip().upper() != NOME_TECNICO_AJUSTE_MANUAL]
+        tecnicos.append(nomes_ajuste[0])
 
     return regras, aliases, tecnicos
 
@@ -501,12 +527,17 @@ def gerar_planilha(df, regras, aliases, tecnicos, publicar_onedrive=False):
         )
 
         # Roteiro por Técnico: somente números, Mobyan primeiro e OGEA abaixo.
+        # Usa uma lista à parte (com coluna em branco antes do "Ajuste
+        # Manual") só aqui, já que é a única visão onde cada técnico vira
+        # uma coluna lado a lado — Resumo e Listas PDF continuam uma linha
+        # por técnico, sem espaçador.
+        tecnicos_colunas = _tecnicos_com_espacador(tecnicos)
         roteiro = df[df["Resultado"] == "ROTEIRIZADA"].copy()
         max_linhas = 0
         dados_colunas = {}
         origens_colunas = {}
 
-        for tecnico in tecnicos:
+        for tecnico in tecnicos_colunas:
             recorte = roteiro[roteiro["Técnico Roteirizado"] == tecnico]
             mobyan = sorted(
                 {int(limpar_os(v)) for v in recorte[recorte["Origem"] == "MOBYAN"]["OS"] if limpar_os(v)},
@@ -521,13 +552,13 @@ def gerar_planilha(df, regras, aliases, tecnicos, publicar_onedrive=False):
             max_linhas = max(max_linhas, len(dados_colunas[tecnico]))
 
         matriz = {}
-        for tecnico in tecnicos:
+        for tecnico in tecnicos_colunas:
             valores = dados_colunas[tecnico]
             matriz[tecnico] = valores + [None] * (max_linhas - len(valores))
 
         pd.DataFrame(matriz).to_excel(writer, index=False, sheet_name="Roteiro por Técnico")
 
-    formatar_planilha(caminho_temp, df, tecnicos, origens_colunas)
+    formatar_planilha(caminho_temp, df, tecnicos_colunas, origens_colunas)
 
     # Espelha a aba "Roteiro por Técnico" numa planilha Excel Online (OneDrive) que
     # o time operacional já usa pra acompanhar o dia — best-effort, nunca pode
@@ -539,7 +570,7 @@ def gerar_planilha(df, regras, aliases, tecnicos, publicar_onedrive=False):
     # cada pequeno ajuste interno.
     if publicar_onedrive and onedrive_excel.esta_configurado():
         try:
-            onedrive_excel.enviar_roteiro_dia(matriz, origens_colunas, tecnicos, datetime.now().date())
+            onedrive_excel.enviar_roteiro_dia(matriz, origens_colunas, tecnicos_colunas, datetime.now().date())
             print("Planilha do OneDrive atualizada com sucesso.")
         except onedrive_excel.PrecisaLoginError as erro:
             print(f"Aviso: {erro}")
