@@ -23,18 +23,27 @@ def aviso(texto):
     print(f"[AVISO] {texto}")
 
 
+NOME_SO = {"darwin": "macOS", "win32": "Windows", "linux": "Linux"}.get(sys.platform, sys.platform)
+
 print("=" * 70)
-print("DIAGNÓSTICO DA CENTRAL MOBYAN - macOS")
+print(f"DIAGNÓSTICO DA CENTRAL MOBYAN - {NOME_SO}")
 print("=" * 70)
 print(f"Python: {sys.version.split()[0]}")
 print(f"Executável: {sys.executable}")
-print(f"macOS: {platform.mac_ver()[0] or 'não identificado'}")
+if sys.platform == "darwin":
+    print(f"macOS: {platform.mac_ver()[0] or 'não identificado'}")
+elif sys.platform == "linux":
+    try:
+        distro = platform.freedesktop_os_release().get("PRETTY_NAME", "")
+    except Exception:
+        distro = ""
+    print(f"Distribuição: {distro or 'não identificada'}")
 print(f"Arquitetura: {platform.machine()}")
 print(f"Projeto: {BASE_DIR}")
 print()
 
-if sys.platform != "darwin":
-    aviso("Este diagnóstico foi preparado para macOS.")
+if sys.platform not in ("darwin", "linux"):
+    aviso("Este diagnóstico foi preparado para macOS e Linux.")
 
 if sys.version_info < (3, 9):
     erro("É necessário Python 3.9 ou superior.")
