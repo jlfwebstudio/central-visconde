@@ -140,9 +140,13 @@ Categories=Office;
 DESKTOP
 chmod +x "$DESKTOP_FILE"
 
-if [ -d "$HOME/Desktop" ]; then
-    cp -f "$DESKTOP_FILE" "$HOME/Desktop/ViscondeApp.desktop"
-    chmod +x "$HOME/Desktop/ViscondeApp.desktop"
+PASTA_AREA_TRABALHO="$(xdg-user-dir DESKTOP 2>/dev/null || true)"
+if [ -z "$PASTA_AREA_TRABALHO" ]; then
+    PASTA_AREA_TRABALHO="$HOME/Desktop"
+fi
+if [ -d "$PASTA_AREA_TRABALHO" ]; then
+    cp -f "$DESKTOP_FILE" "$PASTA_AREA_TRABALHO/ViscondeApp.desktop"
+    chmod +x "$PASTA_AREA_TRABALHO/ViscondeApp.desktop"
 fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then
