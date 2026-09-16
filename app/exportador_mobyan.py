@@ -209,7 +209,7 @@ def abrir_relatorio_ordem_servico_sla(page):
     PASTA_LOGS.mkdir(parents=True, exist_ok=True)
 
     page.wait_for_timeout(3000)
-    page.mouse.click(55, 748)
+    page.get_by_text("OPPAY MENU").click(timeout=15000)
     page.wait_for_timeout(1500)
 
     print("Procurando menu Relatórios...")
