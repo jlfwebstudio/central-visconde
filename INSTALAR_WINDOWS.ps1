@@ -27,39 +27,57 @@ Write-Host "       INSTALACAO DA CENTRAL VISCONDE - Windows"
 Write-Host "================================================================"
 Write-Host ""
 
-# Localiza um Python utilizavel (prefere o launcher "py", que normalmente
-# ja aponta pra versao mais recente instalada).
-$PythonCmd = $null
+# Localiza um Python utilizavel. Prefere versoes especificas (3.13 ate 3.9)
+# via "py -3.X" em vez de confiar no "py" generico, que pega a versao mais
+# nova instalada -- e uma versao Python muito recente pode ainda nao ter
+# wheel pronto de pandas no PyPI, obrigando o pip a compilar do zero (o que
+# falha sem as ferramentas de build do Visual Studio instaladas).
+$PythonExe = $null
+$PythonArgs = @()
 
-if (Get-Command py -ErrorAction SilentlyContinue) {
+foreach ($versao in @("3.13", "3.12", "3.11", "3.10", "3.9")) {
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $teste = & py "-$versao" -c "import sys, tkinter; print('OK')" 2>$null
+        if ($teste -match "OK") {
+            $PythonExe = "py"
+            $PythonArgs = @("-$versao")
+            break
+        }
+    }
+}
+
+if (-not $PythonExe -and (Get-Command py -ErrorAction SilentlyContinue)) {
     $teste = & py -c "import sys, tkinter; print(sys.version_info >= (3,9))" 2>$null
     if ($teste -match "True") {
-        $PythonCmd = "py"
+        $PythonExe = "py"
     }
 }
 
-if (-not $PythonCmd -and (Get-Command python -ErrorAction SilentlyContinue)) {
+if (-not $PythonExe -and (Get-Command python -ErrorAction SilentlyContinue)) {
     $teste = & python -c "import sys, tkinter; print(sys.version_info >= (3,9))" 2>$null
     if ($teste -match "True") {
-        $PythonCmd = "python"
+        $PythonExe = "python"
     }
 }
 
-if (-not $PythonCmd) {
+if (-not $PythonExe) {
     Write-Host "[ERRO] Nao encontrei Python 3.9+ com Tkinter instalado." -ForegroundColor Red
-    Write-Host "Instale o Python em https://python.org/downloads (marque a opcao"
+    Write-Host "Instale o Python 3.12 em https://python.org/downloads (marque a opcao"
     Write-Host "'tcl/tk and IDLE' durante a instalacao) e rode este script de novo."
+    Write-Host "Evite instalar so a versao mais nova do Python: pacotes como"
+    Write-Host "pandas as vezes demoram a publicar suporte pronto (wheel) pra"
+    Write-Host "versoes recem-lancadas, e a instalacao pode falhar por isso."
     Read-Host "Pressione Enter para fechar"
     exit 1
 }
 
-Write-Host "Python encontrado: $PythonCmd"
-& $PythonCmd --version
+Write-Host "Python encontrado: $PythonExe $PythonArgs"
+& $PythonExe @PythonArgs --version
 
 Write-Host ""
 Write-Host "[1/4] Criando ambiente virtual (.venv)..."
 if (-not (Test-Path ".venv")) {
-    & $PythonCmd -m venv .venv
+    & $PythonExe @PythonArgs -m venv .venv
     if ($LASTEXITCODE -ne 0) { throw "Criacao do .venv falhou (codigo $LASTEXITCODE)." }
 } else {
     Write-Host "Ja existe um .venv, mantendo o atual."
