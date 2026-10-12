@@ -83,6 +83,7 @@ OGEA_PRESTADOR = os.getenv("OGEA_PRESTADOR", "SMART TECNOLOGIA").strip() or "SMA
 PASTA_DOWNLOADS = BASE_DIR / "downloads" / "relatorios_completos"
 PASTA_PENDENCIAS = BASE_DIR / "outputs" / "pendencias_do_dia"
 PASTA_IMAGENS_PRESTADOR = BASE_DIR / "outputs" / "por_prestador_imagens"
+PASTA_IMAGENS_PRESTADOR_ESTOQUE = BASE_DIR / "outputs" / "por_prestador_imagens_estoque"
 PASTA_IMAGENS_TECNICO = BASE_DIR / "outputs" / "por_tecnico_imagens"
 PASTA_PRESTADOR_ANTIGA = BASE_DIR / "outputs" / "por_prestador"
 PASTA_LOGS = BASE_DIR / "logs"
@@ -118,6 +119,46 @@ LARGURAS_IMAGEM = {
     "Cliente": 300,
     "CNPJ / CPF": 170,
     "Cidade": 180,
+}
+
+COLUNAS_AGUARDANDO_ESTOQUE = [
+    "SITUAÇÃO",
+    "Chamado",
+    "Numero Referencia",
+    "Contratante",
+    "Serviço",
+    "Status",
+    "Data Limite",
+    "Cliente",
+    "Cidade",
+    "Prestador",
+    "Melhor Equipamento",
+]
+
+COLUNAS_IMAGEM_AGUARDANDO_ESTOQUE = [
+    "SITUAÇÃO",
+    "Chamado",
+    "Numero Referencia",
+    "Contratante",
+    "Serviço",
+    "Status",
+    "Data Limite",
+    "Cliente",
+    "Cidade",
+    "Melhor Equipamento",
+]
+
+LARGURAS_IMAGEM_AGUARDANDO_ESTOQUE = {
+    "SITUAÇÃO": 110,
+    "Chamado": 110,
+    "Numero Referencia": 150,
+    "Contratante": 120,
+    "Serviço": 180,
+    "Status": 150,
+    "Data Limite": 170,
+    "Cliente": 300,
+    "Cidade": 180,
+    "Melhor Equipamento": 260,
 }
 
 ALTURA_CABECALHO_IMAGEM = 34
@@ -209,7 +250,23 @@ def abrir_relatorio_ordem_servico_sla(page):
     PASTA_LOGS.mkdir(parents=True, exist_ok=True)
 
     page.wait_for_timeout(3000)
-    page.get_by_text("OPPAY MENU").click(timeout=15000)
+
+    # Depois de um "sessão anterior encontrada -> Yes -> login de novo" o
+    # portal às vezes deixa mais de um botão "OPPAY MENU" na página (o
+    # toolbar antigo não é removido) — get_by_text sozinho dá erro de modo
+    # estrito nesse caso. Clica no primeiro que estiver de fato visível.
+    botoes_oppay_menu = page.get_by_text("OPPAY MENU")
+    botao_clicado = False
+    for indice in range(botoes_oppay_menu.count()):
+        candidato = botoes_oppay_menu.nth(indice)
+        if candidato.is_visible():
+            candidato.click(timeout=15000)
+            botao_clicado = True
+            break
+
+    if not botao_clicado:
+        raise Exception("Não encontrei um botão OPPAY MENU visível na tela.")
+
     page.wait_for_timeout(1500)
 
     print("Procurando menu Relatórios...")
@@ -264,6 +321,11 @@ def selecionar_status(frame_relatorio):
     frame_relatorio.locator("span").filter(has_text="RECEBIDO PA").click()
     frame_relatorio.locator("label").filter(has_text="REENCAMINHADO").click()
     frame_relatorio.locator("label").filter(has_text="ROLLBACK").click()
+    # exact=True: também existe "AGUARDANDO ESTOQUE TAMPER" na lista, e sem
+    # isso o filtro por texto pegaria os dois.
+    frame_relatorio.get_by_role(
+        "checkbox", name="AGUARDANDO ESTOQUE", exact=True
+    ).check()
 
     frame_relatorio.locator("html").click()
 
@@ -520,6 +582,45 @@ def limpar_valor(valor):
         texto = texto[1:-1].strip()
 
     return texto
+
+
+def resumir_melhor_equipamento(valor):
+    """Extrai só o código do modelo (ex.: "S920", "D195") da coluna bruta
+
+    "Melhor Equipamento" da Mobyan, que vem no formato "POS <MARCA> <MODELO>
+    [variante] - Good" — às vezes com várias opções separadas por "/" (e
+    repetidas). A base só precisa saber qual modelo levar, não a descrição
+    inteira nem a palavra "Good".
+    """
+    texto = limpar_valor(valor)
+
+    if texto == "":
+        return ""
+
+    modelos = []
+
+    # " / " (com espaços) separa opções de equipamento diferentes; um "/" sem
+    # espaço é parte do próprio texto do equipamento (ex.: "WIFI/3G") e não
+    # deve virar um candidato à parte.
+    for candidato in texto.split(" / "):
+        candidato = candidato.split(" - ", 1)[0].strip()
+        tokens = candidato.split()
+
+        if not tokens:
+            continue
+
+        if tokens[0].upper() == "POS":
+            tokens = tokens[1:]
+
+        if not tokens:
+            continue
+
+        modelo = tokens[1] if len(tokens) > 1 else tokens[0]
+
+        if modelo and modelo not in modelos:
+            modelos.append(modelo)
+
+    return " / ".join(modelos)
 
 
 def excluir_bobina(df):
@@ -1230,11 +1331,13 @@ def limpar_pasta_excel_prestador_antiga():
             print(f"Aviso: não consegui apagar arquivo antigo por prestador {arquivo}. Erro: {erro}")
 
 
-def gerar_imagem_prestador(prestador, df_prestador, pasta_saida=None):
+def gerar_imagem_prestador(prestador, df_prestador, pasta_saida=None, colunas=None, larguras=None):
     pasta_saida = pasta_saida or PASTA_IMAGENS_PRESTADOR
-    df_img = df_prestador[COLUNAS_IMAGEM].copy()
+    colunas = colunas or COLUNAS_IMAGEM
+    larguras = larguras or LARGURAS_IMAGEM
+    df_img = df_prestador[colunas].copy()
 
-    total_largura_tabela = sum(LARGURAS_IMAGEM[coluna] for coluna in COLUNAS_IMAGEM)
+    total_largura_tabela = sum(larguras[coluna] for coluna in colunas)
     total_altura_tabela = ALTURA_CABECALHO_IMAGEM + (len(df_img) * ALTURA_LINHA_IMAGEM)
 
     largura_imagem = total_largura_tabela + (MARGEM_IMAGEM * 2)
@@ -1246,8 +1349,8 @@ def gerar_imagem_prestador(prestador, df_prestador, pasta_saida=None):
     x = MARGEM_IMAGEM
     y = MARGEM_IMAGEM
 
-    for coluna in COLUNAS_IMAGEM:
-        largura = LARGURAS_IMAGEM[coluna]
+    for coluna in colunas:
+        largura = larguras[coluna]
         caixa = (x, y, x + largura, y + ALTURA_CABECALHO_IMAGEM)
 
         draw.rectangle(caixa, fill=COR_CABECALHO, outline=COR_BORDA)
@@ -1270,8 +1373,8 @@ def gerar_imagem_prestador(prestador, df_prestador, pasta_saida=None):
 
         x = MARGEM_IMAGEM
 
-        for coluna in COLUNAS_IMAGEM:
-            largura = LARGURAS_IMAGEM[coluna]
+        for coluna in colunas:
+            largura = larguras[coluna]
             caixa = (x, y, x + largura, y + ALTURA_LINHA_IMAGEM)
 
             if coluna == "SITUAÇÃO":
@@ -1325,18 +1428,29 @@ def gerar_imagem_prestador(prestador, df_prestador, pasta_saida=None):
     return caminho_saida
 
 
-def gerar_imagens_por_prestador(df_pendencias):
+def gerar_imagens_por_prestador(df_pendencias, colunas=None, larguras=None, pasta_saida=None):
     print("Gerando imagens por prestador...")
 
-    PASTA_IMAGENS_PRESTADOR.mkdir(parents=True, exist_ok=True)
-    limpar_imagens_antigas()
-    limpar_pasta_excel_prestador_antiga()
+    pasta_saida = pasta_saida or PASTA_IMAGENS_PRESTADOR
+    colunas = colunas or COLUNAS_IMAGEM
+    larguras = larguras or LARGURAS_IMAGEM
+
+    pasta_saida.mkdir(parents=True, exist_ok=True)
+
+    for arquivo in pasta_saida.glob("*.png"):
+        try:
+            arquivo.unlink()
+        except Exception as erro:
+            print(f"Aviso: não consegui apagar imagem antiga {arquivo}. Erro: {erro}")
+
+    if pasta_saida == PASTA_IMAGENS_PRESTADOR:
+        limpar_pasta_excel_prestador_antiga()
 
     if "Prestador" not in df_pendencias.columns:
         print("Coluna Prestador não encontrada. Pulando geração de imagens.")
         return {}
 
-    for coluna in COLUNAS_IMAGEM:
+    for coluna in colunas:
         if coluna not in df_pendencias.columns:
             df_pendencias[coluna] = ""
 
@@ -1359,7 +1473,9 @@ def gerar_imagens_por_prestador(df_pendencias):
         if df_prestador.empty:
             continue
 
-        caminho = gerar_imagem_prestador(prestador, df_prestador)
+        caminho = gerar_imagem_prestador(
+            prestador, df_prestador, pasta_saida=pasta_saida, colunas=colunas, larguras=larguras
+        )
         imagens[prestador] = caminho
 
         print(f"Imagem gerada: {caminho}")
@@ -1761,6 +1877,30 @@ def criar_mensagem_acompanhamento(responsavel, prestador, total_pendencias, venc
     return mensagem
 
 
+def criar_mensagem_aguardando_estoque(responsavel, prestador, total):
+    """Lembrete semanal (envio manual, sem escolha de modelo — só existe essa
+    mensagem) pras OSs que ficaram paradas em "Aguardando Estoque": o
+    objetivo é a base confirmar se o equipamento já chegou, já que esse
+    status costuma ser esquecido e a OS acaba vencendo."""
+    nome = responsavel.strip() if not valor_vazio(responsavel) else ""
+    saudacao = f"Oi, {nome}, tudo bem?" if nome else "Oi, tudo bem?"
+
+    if total <= 0:
+        return ""
+
+    plural = "OS" if total == 1 else "OSs"
+
+    mensagem = (
+        f"{saudacao}\n\n"
+        f"Base {prestador}: temos {total} {plural} em \"aguardando estoque\". "
+        "Gostaria de ver com vocês se ainda estamos com falta desses terminais, "
+        "ou se já recebemos para atender.\n\n"
+        "Segue a lista com o modelo de equipamento de cada uma."
+    )
+
+    return mensagem
+
+
 def criar_mensagem_tecnico_envio(tecnico, total_pendencias, vencidas, vence_hoje):
     """Mensagem individual pro técnico (RS-SMART matriz) — bem mais simples que a
     de base (sem menu de opções numeradas): só um aviso curto, já que a lista
@@ -1932,6 +2072,92 @@ def criar_dataframe_envios(df_pendencias, imagens_por_prestador, df_ranking_sla=
     df_envios = pd.DataFrame(linhas, columns=colunas_envios)
 
     print(f"Fila de envios criada: {len(df_envios)} registro(s).")
+
+    return df_envios
+
+
+def criar_dataframe_envios_aguardando_estoque(df_aguardando_estoque, imagens_por_prestador):
+    """Mesma ideia de criar_dataframe_envios, mas bem mais simples: só uma
+
+    mensagem (sem manhã/acompanhamento) e sem nível de cobrança/tendência de
+    SLA, já que esse envio é manual e semanal, não parte da cobrança diária."""
+    print("Criando fila de envios de aguardando estoque...")
+
+    contatos = ler_contatos_prestadores()
+
+    colunas_envios = [
+        "Prestador",
+        "Responsável",
+        "WhatsApp",
+        "Enviar",
+        "Imagem",
+        "Total OSs",
+        "Status Envio",
+        "Mensagem",
+        "Observação",
+    ]
+
+    if contatos.empty:
+        print("Nenhum contato encontrado para envio.")
+        return pd.DataFrame(columns=colunas_envios)
+
+    linhas = []
+
+    for _, contato in contatos.iterrows():
+        prestador = contato["Prestador"]
+        responsavel = contato["Responsável"]
+        whatsapp = contato["WhatsApp"]
+        enviar = contato["Enviar"]
+        observacao = contato["Observação"]
+
+        enviar_normalizado = enviar.strip().lower()
+
+        df_prestador = df_aguardando_estoque[
+            df_aguardando_estoque["Prestador"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            == prestador
+        ].copy()
+
+        total = len(df_prestador)
+
+        caminho_imagem = imagens_por_prestador.get(prestador, "")
+        caminho_imagem_texto = str(caminho_imagem) if caminho_imagem else ""
+
+        mensagem = ""
+
+        if enviar_normalizado not in ["sim", "s", "yes", "y"]:
+            status = "Não marcado para envio"
+        elif whatsapp == "":
+            status = "WhatsApp não informado"
+        elif total == 0:
+            status = "Sem OSs aguardando estoque"
+        elif not caminho_imagem or not Path(caminho_imagem).exists():
+            status = "Imagem não encontrada"
+        else:
+            status = "Pronto para envio"
+            mensagem = criar_mensagem_aguardando_estoque(
+                responsavel=responsavel,
+                prestador=prestador,
+                total=total,
+            )
+
+        linhas.append({
+            "Prestador": prestador,
+            "Responsável": responsavel,
+            "WhatsApp": whatsapp,
+            "Enviar": enviar,
+            "Imagem": caminho_imagem_texto,
+            "Total OSs": total,
+            "Status Envio": status,
+            "Mensagem": mensagem,
+            "Observação": observacao,
+        })
+
+    df_envios = pd.DataFrame(linhas, columns=colunas_envios)
+
+    print(f"Fila de envios de aguardando estoque criada: {len(df_envios)} registro(s).")
 
     return df_envios
 
@@ -2936,6 +3162,33 @@ def gerar_planilha_pendencias(caminho_csv_completo):
         hoje=hoje,
     )
 
+    # "Aguardando Estoque" é um status à parte: a OS fica esperando a máquina
+    # chegar, e não deve entrar na cobrança diária normal (Pendências,
+    # Acompanhamento, SLA, Envios) nem no Chamados unificado — só existe uma
+    # aba própria pra acompanhar esse status separadamente (ver mais abaixo).
+    esta_aguardando_estoque = df_chamados["Status"].apply(normalizar_texto) == "AGUARDANDO ESTOQUE"
+    df_aguardando_estoque = df_chamados[esta_aguardando_estoque].copy()
+    df_aguardando_estoque = df_aguardando_estoque.sort_values(by="Prestador", ascending=True)
+    df_chamados = df_chamados[~esta_aguardando_estoque].copy()
+
+    # "Melhor Equipamento" só existe no relatório bruto da Mobyan (não faz
+    # parte do conjunto de colunas padrão usado em Pendências/Chamados) — casa
+    # por "Chamado" em vez de por posição, pra não depender da ordem das
+    # linhas sobreviver aos filtros/sort acima. Usa normalizar_chamado (só
+    # dígitos) nos dois lados: "Chamado" bruto do CSV pode vir com aspas de
+    # fórmula do Excel (ex.: ="18672893") que .astype(str).str.strip() não
+    # tira, e aí o cruzamento perde a linha.
+    mapa_melhor_equipamento = dict(
+        zip(
+            df_bruto["Chamado"].apply(normalizar_chamado),
+            df_bruto["Melhor Equipamento"].apply(resumir_melhor_equipamento),
+        )
+    )
+    df_aguardando_estoque["Melhor Equipamento"] = (
+        df_aguardando_estoque["Chamado"].apply(normalizar_chamado).map(mapa_melhor_equipamento).fillna("")
+    )
+    df_aguardando_estoque = df_aguardando_estoque[COLUNAS_AGUARDANDO_ESTOQUE]
+
     df_pendencias = df_chamados[
         df_chamados["SITUAÇÃO"].isin(["VENCIDA", "VENCE HOJE"])
     ].copy()
@@ -3014,6 +3267,25 @@ def gerar_planilha_pendencias(caminho_csv_completo):
             "Mensagem Acompanhamento", "Observação",
         ])
 
+    # Envio semanal manual de "Aguardando Estoque" — mesma tolerância a falha
+    # das outras integrações desta sessão: nunca trava a planilha principal.
+    try:
+        imagens_por_prestador_estoque = gerar_imagens_por_prestador(
+            df_aguardando_estoque,
+            colunas=COLUNAS_IMAGEM_AGUARDANDO_ESTOQUE,
+            larguras=LARGURAS_IMAGEM_AGUARDANDO_ESTOQUE,
+            pasta_saida=PASTA_IMAGENS_PRESTADOR_ESTOQUE,
+        )
+        df_envios_aguardando_estoque = criar_dataframe_envios_aguardando_estoque(
+            df_aguardando_estoque, imagens_por_prestador_estoque
+        )
+    except Exception as erro:
+        print(f"Não consegui montar a fila de envios de aguardando estoque agora ({erro}). A aba 'Envios Aguardando Estoque' sairá vazia nesta execução.")
+        df_envios_aguardando_estoque = pd.DataFrame(columns=[
+            "Prestador", "Responsável", "WhatsApp", "Enviar", "Imagem",
+            "Total OSs", "Status Envio", "Mensagem", "Observação",
+        ])
+
     caminho_saida = ARQUIVO_FINAL_PENDENCIAS
 
     criar_backup_planilha_atual()
@@ -3028,30 +3300,36 @@ def gerar_planilha_pendencias(caminho_csv_completo):
         criar_aba_resumo(writer, df_pendencias, df_acompanhamento)
         df_pendencias.to_excel(writer, index=False, sheet_name="Pendências Mobyan")
         df_pendencias_ogea.to_excel(writer, index=False, sheet_name="Pendências OGEA")
+        df_aguardando_estoque.to_excel(writer, index=False, sheet_name="Aguardando Estoque")
         df_acompanhamento.to_excel(writer, index=False, sheet_name="Acompanhamento")
         df_chamados_unificado.to_excel(writer, index=False, sheet_name="Chamados")
         df_ranking_sla.to_excel(writer, index=False, sheet_name="SLA por Base")
         df_detalhe_tecnico_sla.to_excel(writer, index=False, sheet_name="SLA por Técnico")
         df_envios.to_excel(writer, index=False, sheet_name="Envios")
         df_envios_tecnicos.to_excel(writer, index=False, sheet_name="Envios Técnicos")
+        df_envios_aguardando_estoque.to_excel(writer, index=False, sheet_name="Envios Aguardando Estoque")
 
     formatar_planilha_dados(caminho_saida, "Pendências Mobyan")
     formatar_planilha_dados(caminho_saida, "Pendências OGEA")
+    formatar_planilha_dados(caminho_saida, "Aguardando Estoque")
     formatar_aba_acompanhamento(caminho_saida, layout_acompanhamento_anterior)
     formatar_planilha_dados(caminho_saida, "Chamados")
     formatar_aba_sla(caminho_saida, "SLA por Base")
     formatar_aba_sla(caminho_saida, "SLA por Técnico")
     formatar_aba_envios(caminho_saida, "Envios")
     formatar_aba_envios(caminho_saida, "Envios Técnicos")
+    formatar_aba_envios(caminho_saida, "Envios Aguardando Estoque")
     formatar_aba_resumo(caminho_saida)
 
     print(f"Planilha final salva em: {caminho_saida}")
     print(f"Total de pendências encontradas (Mobyan): {len(df_pendencias)}")
     print(f"Total de pendências encontradas (OGEA): {len(df_pendencias_ogea)}")
+    print(f"Total de OSs aguardando estoque: {len(df_aguardando_estoque)}")
     print(f"Total de OSs em acompanhamento: {len(df_acompanhamento)}")
     print(f"Total de chamados no relatório completo: {len(df_chamados_unificado)}")
     print(f"Bases em nível crítico de cobrança: {len(df_ranking_sla[df_ranking_sla['Nível de Cobrança'] == 'CRÍTICO']) if not df_ranking_sla.empty else 0}")
     print(f"Técnicos com envio pronto: {len(df_envios_tecnicos[df_envios_tecnicos['Status Envio'] == 'Pronto para envio']) if not df_envios_tecnicos.empty else 0}")
+    print(f"Bases com envio de aguardando estoque pronto: {len(df_envios_aguardando_estoque[df_envios_aguardando_estoque['Status Envio'] == 'Pronto para envio']) if not df_envios_aguardando_estoque.empty else 0}")
     print(f"Imagens por prestador salvas em: {PASTA_IMAGENS_PRESTADOR}")
 
     return caminho_saida
@@ -3381,7 +3659,7 @@ def formatar_aba_envios(caminho_xlsx, nome_aba="Envios"):
 
         if status == "Pronto para envio":
             preenchimento_linha = preenchimento_pronto
-        elif status in ["Sem pendências", "Não marcado para envio"]:
+        elif status in ["Sem pendências", "Sem OSs aguardando estoque", "Não marcado para envio"]:
             preenchimento_linha = preenchimento_atencao
         else:
             preenchimento_linha = preenchimento_erro
@@ -3415,6 +3693,7 @@ def formatar_aba_envios(caminho_xlsx, nome_aba="Envios"):
         "Enviar": 12,
         "Imagem": 70,
         "Total Pendências": 18,
+        "Total OSs": 12,
         "Vencidas": 12,
         "Vence Hoje": 14,
         "Nível de Cobrança": 16,
@@ -3435,7 +3714,11 @@ def formatar_aba_envios(caminho_xlsx, nome_aba="Envios"):
         else:
             ws.column_dimensions[letra].width = 18
 
-    if col_mensagem:
+    # "Mensagem" só é escondida quando é cópia legada de "Mensagem Manhã"
+    # (abas Envios/Envios Técnicos) — em abas com uma única mensagem (ex.:
+    # Envios Aguardando Estoque) ela é a única coluna com o texto, não pode
+    # ficar escondida.
+    if col_mensagem and (col_mensagem_manha or col_mensagem_acompanhamento):
         letra_mensagem = get_column_letter(col_mensagem)
         ws.column_dimensions[letra_mensagem].hidden = True
 

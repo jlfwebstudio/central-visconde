@@ -1395,10 +1395,11 @@ class CentralVisconde:
             argumentos=["--arquivo", arquivo],
         )
 
-    def escolher_modelo_mensagem(self):
+    def escolher_modelo_mensagem(self, incluir_aguardando_estoque=False):
         janela = tk.Toplevel(self.root)
         janela.title("Modelo de mensagem")
-        janela.geometry("580x390")
+        altura = 470 if incluir_aguardando_estoque else 390
+        janela.geometry(f"580x{altura}")
         janela.resizable(False, False)
         janela.configure(bg=COR_FUNDO)
         janela.transient(self.root)
@@ -1406,7 +1407,6 @@ class CentralVisconde:
         escolha = {"valor": None}
         janela.update_idletasks()
         largura = 580
-        altura = 390
         x = (janela.winfo_screenwidth() // 2) - (largura // 2)
         y = (janela.winfo_screenheight() // 2) - (altura // 2)
         janela.geometry(f"{largura}x{altura}+{x}+{y}")
@@ -1421,6 +1421,8 @@ class CentralVisconde:
 
         ActionCard(container, "Mensagem da Manhã", "Primeiro envio do dia com cobrança das vencidas.", lambda: selecionar("manha"), COR_AZUL, COR_AZUL_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
         ActionCard(container, "Acompanhamento", "Atualização das pendências ao longo do dia.", lambda: selecionar("acompanhamento"), COR_VERDE, COR_VERDE_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
+        if incluir_aguardando_estoque:
+            ActionCard(container, "Aguardando Estoque", "Lembrete semanal pras bases sobre OSs paradas em \"aguardando estoque\".", lambda: selecionar("aguardando_estoque"), COR_LARANJA, COR_LARANJA_HOVER, largura=510, altura=82).pack(fill="x", pady=6)
         SmallButton(container, "", "Cancelar", lambda: selecionar(None)).pack(fill="x", pady=(8, 0))
         janela.wait_window()
         return escolha["valor"]
@@ -1459,6 +1461,15 @@ class CentralVisconde:
         destino = self.escolher_destino_envio()
         if destino is None:
             return
+
+        modelo = self.escolher_modelo_mensagem(incluir_aguardando_estoque=(destino == "bases"))
+        if modelo is None:
+            return
+
+        if modelo == "aguardando_estoque":
+            self.enviar_whatsapp_aguardando_estoque()
+            return
+
         nome_aba_envios = "Envios Técnicos" if destino == "tecnicos" else "Envios"
         rotulo_unidade = "técnico(s)" if destino == "tecnicos" else "prestador(es)"
         rotulo_ausencia = "nenhum técnico" if destino == "tecnicos" else "nenhuma base"
@@ -1467,9 +1478,6 @@ class CentralVisconde:
         if prontos <= 0:
             messagebox.showwarning("Nenhum envio pronto", f"Não há {rotulo_ausencia} com Status Envio = Pronto para envio.")
             self.atualizar_resumos()
-            return
-        modelo = self.escolher_modelo_mensagem()
-        if modelo is None:
             return
         nome_modelo = "Mensagem da Manhã" if modelo == "manha" else "Mensagem de Acompanhamento"
         resposta = messagebox.askyesno(
@@ -1483,6 +1491,31 @@ class CentralVisconde:
             "Enviar Pendências WhatsApp",
             f"Envio das pendências para {'os técnicos' if destino == 'tecnicos' else 'as bases'} concluído.",
             env_extra={"MODELO_MENSAGEM": modelo, "DESTINO_ENVIO": destino},
+        )
+
+    def enviar_whatsapp_aguardando_estoque(self):
+        """Envio manual/semanal — só uma mensagem, sem escolha de destino ou
+        modelo (ver criar_mensagem_aguardando_estoque em exportador_mobyan.py)."""
+        dados = self.ler_envios_para_resumo("Envios Aguardando Estoque")
+        prontos = dados["prontos"]
+        if prontos <= 0:
+            messagebox.showwarning(
+                "Nenhum envio pronto",
+                "Não há nenhuma base com Status Envio = Pronto para envio na aba Aguardando Estoque.",
+            )
+            self.atualizar_resumos()
+            return
+        resposta = messagebox.askyesno(
+            "Confirmar envio",
+            f"Serão enviados {prontos} lembrete(s) de \"aguardando estoque\" por WhatsApp.\n\nDeseja continuar?",
+        )
+        if not resposta:
+            return
+        self.rodar_script(
+            SCRIPT_ENVIAR_WHATSAPP,
+            "Enviar Aguardando Estoque WhatsApp",
+            "Envio dos lembretes de aguardando estoque concluído.",
+            env_extra={"DESTINO_ENVIO": "aguardando_estoque"},
         )
 
     def fechar_gestao_rotas(self):

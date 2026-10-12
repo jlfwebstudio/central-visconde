@@ -174,6 +174,51 @@ def ler_fila_envios_tecnicos():
     return df[["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"]]
 
 
+def ler_fila_envios_aguardando_estoque():
+    """Mesmo formato de ler_fila_envios_tecnicos(), mas pra fila semanal de
+
+    "Aguardando Estoque" (aba "Envios Aguardando Estoque", ver
+    exportador_mobyan.py). Só existe uma mensagem (coluna "Mensagem"), sem
+    MODELO_MENSAGEM/manhã-acompanhamento. Tolerante à ausência da aba."""
+    if not ARQUIVO_PLANILHA.exists():
+        return pd.DataFrame(columns=["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"])
+
+    try:
+        df = pd.read_excel(
+            ARQUIVO_PLANILHA,
+            sheet_name="Envios Aguardando Estoque",
+            dtype=str,
+            keep_default_na=False,
+            na_filter=False,
+        )
+    except Exception:
+        return pd.DataFrame(columns=["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"])
+
+    df.columns = [str(coluna).strip() for coluna in df.columns]
+
+    colunas_obrigatorias = ["Prestador", "Responsável", "WhatsApp", "Enviar", "Imagem", "Status Envio", "Mensagem"]
+
+    for coluna in colunas_obrigatorias:
+        if coluna not in df.columns:
+            return pd.DataFrame(columns=["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"])
+
+    for coluna in df.columns:
+        df[coluna] = df[coluna].astype(str).str.strip()
+
+    df["_Mensagem_Selecionada"] = df["Mensagem"].fillna("").astype(str).str.strip()
+
+    df["Enviar_Normalizado"] = df["Enviar"].fillna("").astype(str).str.strip().str.lower()
+    df = df[df["Enviar_Normalizado"].isin(["sim", "s", "yes", "y"])].copy()
+    df = df[df["Status Envio"] == "Pronto para envio"].copy()
+    df = df[df["WhatsApp"] != ""].copy()
+    df = df[df["Imagem"] != ""].copy()
+    df = df[df["_Mensagem_Selecionada"] != ""].copy()
+
+    print(f"Envios de aguardando estoque prontos: {len(df)}")
+
+    return df[["Prestador", "Responsável", "WhatsApp", "Imagem", "_Mensagem_Selecionada"]]
+
+
 def aguardar_login_whatsapp(page):
     print("Abrindo WhatsApp Web...")
 
@@ -463,6 +508,8 @@ def processar_envio(page, linha):
 def enviar_whatsapp():
     if DESTINO_ENVIO == "tecnicos":
         df_envios = ler_fila_envios_tecnicos()
+    elif DESTINO_ENVIO == "aguardando_estoque":
+        df_envios = ler_fila_envios_aguardando_estoque()
     else:
         df_envios = ler_fila_envios()
 
