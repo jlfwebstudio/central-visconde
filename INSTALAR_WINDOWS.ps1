@@ -121,6 +121,22 @@ foreach ($pasta in $Pastas) {
     New-Item -ItemType Directory -Force -Path $pasta | Out-Null
 }
 
+Write-Host "Criando atalho na Area de Trabalho..."
+try {
+    $CaminhoDesktop = [Environment]::GetFolderPath("Desktop")
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Atalho = $WshShell.CreateShortcut("$CaminhoDesktop\ViscondeApp.lnk")
+    $Atalho.TargetPath = "$PSScriptRoot\INICIAR_CENTRAL_WINDOWS.bat"
+    $Atalho.WorkingDirectory = "$PSScriptRoot"
+    $IconePath = "$PSScriptRoot\assets\logo_visconde.ico"
+    if (Test-Path $IconePath) {
+        $Atalho.IconLocation = $IconePath
+    }
+    $Atalho.Save()
+} catch {
+    Write-Host "[AVISO] Nao consegui criar o atalho na Area de Trabalho automaticamente." -ForegroundColor Yellow
+}
+
 if (-not (Test-Path ".env")) {
     if (Test-Path ".env.exemplo") {
         Copy-Item ".env.exemplo" ".env"
