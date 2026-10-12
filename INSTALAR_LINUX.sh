@@ -104,12 +104,14 @@ mkdir -p \
     logs/abonos_ogea \
     outputs/pendencias_do_dia/backups \
     outputs/por_prestador_imagens \
+    outputs/por_prestador_imagens_estoque \
     outputs/whatsapp_temp \
     outputs/roteirizacao \
     outputs/pdfs \
     outputs/abonos_ogea \
     bases/backups_roteirizacao \
-    whatsapp_profile
+    whatsapp_profile \
+    onedrive_profile
 
 # --- Atalho no menu de aplicativos (padrão XDG, não precisa de root) --------
 chmod +x INICIAR_CENTRAL_LINUX.sh DIAGNOSTICO_LINUX.sh 2>/dev/null || true

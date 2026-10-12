@@ -90,12 +90,14 @@ $Pastas = @(
     "logs\abonos_ogea",
     "outputs\pendencias_do_dia\backups",
     "outputs\por_prestador_imagens",
+    "outputs\por_prestador_imagens_estoque",
     "outputs\whatsapp_temp",
     "outputs\roteirizacao",
     "outputs\pdfs",
     "outputs\abonos_ogea",
     "bases\backups_roteirizacao",
-    "whatsapp_profile"
+    "whatsapp_profile",
+    "onedrive_profile"
 )
 foreach ($pasta in $Pastas) {
     New-Item -ItemType Directory -Force -Path $pasta | Out-Null

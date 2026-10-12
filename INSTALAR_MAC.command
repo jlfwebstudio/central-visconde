@@ -117,12 +117,17 @@ mkdir -p \
     downloads/roteirizacao/ogea \
     logs/roteirizacao \
     logs/pdfs \
+    logs/abonos_ogea \
     outputs/pendencias_do_dia/backups \
     outputs/por_prestador_imagens \
+    outputs/por_prestador_imagens_estoque \
     outputs/whatsapp_temp \
     outputs/roteirizacao \
     outputs/pdfs \
-    whatsapp_profile
+    outputs/abonos_ogea \
+    bases/backups_roteirizacao \
+    whatsapp_profile \
+    onedrive_profile
 
 # Cria um aplicativo local sem assinatura, evitando depender do Terminal no uso diário.
 APP_DIR="$HOME/Applications/ViscondeApp.app"
