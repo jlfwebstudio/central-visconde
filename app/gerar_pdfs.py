@@ -1038,7 +1038,7 @@ def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
     )
 
     with sync_playwright() as playwright:
-        navegador = playwright.chromium.launch(headless=False)
+        navegador = playwright.chromium.launch(headless=True)
         contexto = navegador.new_context(
             accept_downloads=True,
             viewport={"width": 1600, "height": 900},
@@ -1571,7 +1571,7 @@ def gerar_pdfs_ogea(listas, pasta_destino=PASTA_PDFS):
     gerados = []
 
     with sync_playwright() as playwright:
-        navegador = playwright.chromium.launch(headless=False)
+        navegador = playwright.chromium.launch(headless=True)
         contexto = navegador.new_context(
             accept_downloads=True,
             viewport={"width": 1600, "height": 900},

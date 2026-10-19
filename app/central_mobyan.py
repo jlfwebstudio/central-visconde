@@ -1849,8 +1849,9 @@ def instalar_chromium_com_progresso(root, ao_concluir):
             # --force evita que uma tentativa anterior parcial/corrompida (ex:
             # interrompida por antivírus) faça o instalador achar que já está
             # tudo pronto e não baixar nada. --no-shell pula o Chrome Headless
-            # Shell, que não usamos (a automação sempre roda com navegador
-            # visível, headless=False).
+            # Shell, que não usamos (o Chromium completo já instalado cobre
+            # tanto os poucos scripts que ainda abrem janela visível quanto
+            # o modo headless usado pela automação do dia a dia).
             resultado = subprocess.run(
                 [str(driver_executable), driver_cli, "install", "--force", "--no-shell", "chromium"],
                 env=get_driver_env(),

@@ -150,7 +150,7 @@ def baixar_relatorio_sla(data_inicial, data_final):
     print("=" * 70)
 
     with sync_playwright() as p:
-        navegador = p.chromium.launch(headless=False)
+        navegador = p.chromium.launch(headless=True)
         # Mesmo viewport usado em todos os outros scripts Mobyan — o clique que
         # abre a bandeja "OPPAY MENU" é por coordenada fixa de pixel (ver
         # abrir_menu_oppay), então precisa bater com a posição real da barra.

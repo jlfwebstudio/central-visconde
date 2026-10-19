@@ -525,9 +525,18 @@ def enviar_whatsapp():
     with sync_playwright() as p:
         contexto = p.chromium.launch_persistent_context(
             user_data_dir=str(PASTA_PERFIL_WHATSAPP),
-            headless=False,
+            headless=True,
             viewport={"width": 1366, "height": 768},
             accept_downloads=True,
+            # O WhatsApp Web detecta o Chromium headless padrão (pelo
+            # User-Agent e pela flag de automação) e mostra uma tela de
+            # "atualize seu navegador" em vez do app de verdade. Fingindo
+            # ser um Chrome normal, carrega certinho (testado ao vivo).
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+            ),
+            args=["--disable-blink-features=AutomationControlled"],
         )
 
         page = contexto.new_page()

@@ -282,7 +282,7 @@ def baixar_relatorio_mobyan():
     print("=" * 70)
 
     with sync_playwright() as p:
-        navegador = p.chromium.launch(headless=False)
+        navegador = p.chromium.launch(headless=True)
         contexto = navegador.new_context(
             accept_downloads=True,
             viewport={"width": 1366, "height": 768},
@@ -813,7 +813,7 @@ def baixar_relatorio_ogea():
     print("=" * 70)
 
     with sync_playwright() as p:
-        navegador = p.chromium.launch(headless=False)
+        navegador = p.chromium.launch(headless=True)
         contexto = navegador.new_context(
             accept_downloads=True,
             viewport={"width": 1600, "height": 900},

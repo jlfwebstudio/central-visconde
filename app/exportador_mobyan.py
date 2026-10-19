@@ -3903,7 +3903,7 @@ def exportar_relatorio_completo():
     caminho_csv_temporario = PASTA_DOWNLOADS / nome_csv_temporario
 
     with sync_playwright() as p:
-        navegador = p.chromium.launch(headless=False)
+        navegador = p.chromium.launch(headless=True)
 
         contexto = navegador.new_context(
             accept_downloads=True,
