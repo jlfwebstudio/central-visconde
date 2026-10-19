@@ -18,6 +18,7 @@ from openpyxl.utils import get_column_letter
 from baixar_relatorios_roteirizacao import baixar_relatorios_automaticamente
 from gestao_rotas import garantir_estrutura_base
 import onedrive_excel
+import progresso
 
 
 from caminho_base import BASE_DIR
@@ -864,11 +865,14 @@ def main():
     print(f"Relatório Mobyan: {caminho_mobyan}")
     print(f"Relatório OGEA: {caminho_ogea}")
 
+    progresso.emitir(70, "Calculando rotas por técnico...")
     df, regras, aliases, tecnicos = executar_motor(
         caminho_mobyan, caminho_ogea,
         usar_resolucoes_temporarias=args.usar_resolucoes_temporarias,
     )
+    progresso.emitir(90, "Salvando planilha de roteirização...")
     atual = gerar_planilha(df, regras, aliases, tecnicos, publicar_onedrive=args.publicar_onedrive)
+    progresso.emitir(100, "Roteirização concluída.")
 
     if args.usar_resolucoes_temporarias and ARQUIVO_RESOLUCOES_TEMPORARIAS.exists():
         try:

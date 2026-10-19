@@ -41,6 +41,7 @@ from autenticacao import (
     verificar_atualizacao,
 )
 from caminho_base import BASE_DIR, FROZEN, RECURSOS_DIR
+import progresso
 
 SCRIPT_GERAR_PENDENCIAS = RECURSOS_DIR / "app" / "exportador_mobyan.py"
 SCRIPT_CALCULADORA_SLA = RECURSOS_DIR / "app" / "calculadora_sla_mobyan.py"
@@ -619,6 +620,9 @@ class CentralVisconde:
             anchor="w",
         )
         self.status.pack(side="left", fill="x")
+        self.barra_progresso = ttk.Progressbar(
+            status_frame, mode="determinate", maximum=100, length=180
+        )
         link_logs = tk.Label(
             status_frame,
             text="Ver log completo →",
@@ -1007,6 +1011,10 @@ class CentralVisconde:
     def definir_status(self, texto, cor=COR_DOURADO):
         self.status.config(text=f"Status: {texto}", fg=cor)
 
+    def definir_progresso(self, percentual, mensagem):
+        self.barra_progresso["value"] = max(0, min(100, percentual))
+        self.definir_status(mensagem, COR_DOURADO)
+
     def notificar(self, titulo, mensagem):
         try:
             if os.name == "nt":
@@ -1180,6 +1188,8 @@ class CentralVisconde:
         self.acao_atual = nome_acao
         self.travar_botoes()
         self.definir_status(f"{nome_acao} em andamento...", COR_DOURADO)
+        self.barra_progresso["value"] = 0
+        self.barra_progresso.pack(side="right", padx=(0, 16))
         self.log_text.delete("1.0", "end")
         self.escrever_log(f"Iniciando: {nome_acao}\n")
         self.escrever_log("=" * 70 + "\n\n")
@@ -1219,6 +1229,13 @@ class CentralVisconde:
                 **kwargs_processo,
             )
             for linha in processo.stdout:
+                if linha.startswith(progresso.PREFIXO):
+                    try:
+                        _, percentual, mensagem = linha.rstrip("\n").split(":", 2)
+                        self.log_queue.put(("progresso", (int(percentual), mensagem)))
+                        continue
+                    except ValueError:
+                        pass
                 self.log_queue.put(("log", linha))
             processo.wait()
             if processo.returncode == 0:
@@ -1234,9 +1251,13 @@ class CentralVisconde:
                 tipo, conteudo = self.log_queue.get_nowait()
                 if tipo == "log":
                     self.escrever_log(conteudo)
+                elif tipo == "progresso":
+                    percentual, mensagem = conteudo
+                    self.definir_progresso(percentual, mensagem)
                 elif tipo == "sucesso":
                     acao_concluida = self.acao_atual
                     self.acao_atual = None
+                    self.barra_progresso.pack_forget()
                     self.escrever_log("\n" + "=" * 70 + "\n")
                     self.escrever_log(conteudo + "\n")
                     self.definir_status(conteudo, COR_VERDE)
@@ -1247,6 +1268,7 @@ class CentralVisconde:
                         self.root.after(450, self.finalizar_roteirizacao_pos_execucao)
                 elif tipo == "erro":
                     self.acao_atual = None
+                    self.barra_progresso.pack_forget()
                     self.escrever_log("\n" + "=" * 70 + "\n")
                     self.escrever_log(conteudo + "\n")
                     self.definir_status("erro na automação", COR_VERMELHO)

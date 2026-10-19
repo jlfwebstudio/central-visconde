@@ -7,7 +7,10 @@ import pandas as pd
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
+import re
+
 from caminho_base import BASE_DIR
+import progresso
 ARQUIVO_PLANILHA = BASE_DIR / "outputs" / "pendencias_do_dia" / "pendencias_do_dia_atual.xlsx"
 PASTA_PERFIL_WHATSAPP = BASE_DIR / "whatsapp_profile"
 PASTA_TEMP_WHATSAPP = BASE_DIR / "outputs" / "whatsapp_temp"
@@ -472,6 +475,14 @@ def enviar_mensagem_com_imagem(page, imagem):
     print("Imagem e mensagem enviadas.")
 
 
+def nome_curto_prestador(prestador):
+    """"RS-SMART - CAXIAS DO SUL" -> "Caxias Do Sul" (só pra mensagem de
+
+    progresso na Central; "RS-SMART" sozinho, sem sufixo, fica como está)."""
+    texto = re.sub(r"^RS-SMART\s*-\s*", "", str(prestador)).strip()
+    return texto.title() if texto else str(prestador)
+
+
 def processar_envio(page, linha):
     prestador = linha["Prestador"]
     responsavel = linha["Responsável"]
@@ -541,9 +552,17 @@ def enviar_whatsapp():
 
         page = contexto.new_page()
 
+        progresso.emitir(5, "Abrindo WhatsApp Web...")
         aguardar_login_whatsapp(page)
 
-        for _, linha in df_envios.iterrows():
+        total = len(df_envios)
+        for indice, (_, linha) in enumerate(df_envios.iterrows(), start=1):
+            percentual = 10 + round((indice - 1) / total * 85)
+            nome_destino = nome_curto_prestador(linha["Prestador"])
+            responsavel = str(linha.get("Responsável", "")).strip()
+            rotulo = f"{responsavel} - {nome_destino}" if responsavel else nome_destino
+            progresso.emitir(percentual, f"Enviando pendências {rotulo}")
+
             processar_envio(page, linha)
 
             print(f"Aguardando {TEMPO_ENTRE_CONTATOS} segundos antes do próximo envio...")
@@ -561,6 +580,7 @@ def enviar_whatsapp():
 
         contexto.close()
 
+    progresso.emitir(100, "Envios de WhatsApp concluídos.")
     print("Processo de WhatsApp finalizado.")
 
 

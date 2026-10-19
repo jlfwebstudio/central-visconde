@@ -36,6 +36,7 @@ from baixar_relatorios_roteirizacao import (
 
 
 from caminho_base import BASE_DIR
+import progresso
 load_dotenv(BASE_DIR / ".env")
 
 ARQUIVO_ROTEIRIZACAO = (
@@ -1872,16 +1873,20 @@ def main():
     else:
         # Execução normal: os PDFs separados ficam temporariamente em
         # _temporarios e são unidos em um único roteiro por técnico.
+        progresso.emitir(10, "Gerando PDFs Mobyan...")
         gerar_pdfs_mobyan(
             listas,
             pasta_destino=PASTA_PDFS_TEMP,
         )
+        progresso.emitir(55, "Gerando PDFs OGEA...")
         gerar_pdfs_ogea(
             listas,
             pasta_destino=PASTA_PDFS_TEMP,
         )
+        progresso.emitir(90, "Unindo PDFs por técnico...")
         gerados = unir_pdfs_por_tecnico(listas)
 
+    progresso.emitir(100, "Roteiros PDF gerados com sucesso.")
     print("")
     print("=" * 70)
 

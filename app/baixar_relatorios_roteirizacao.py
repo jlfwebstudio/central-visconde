@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright
 
 
 from caminho_base import BASE_DIR
+import progresso
 
 PASTA_DOWNLOADS_ROTEIRO = BASE_DIR / "downloads" / "roteirizacao"
 PASTA_DOWNLOADS_MOBYAN = PASTA_DOWNLOADS_ROTEIRO / "mobyan"
@@ -280,6 +281,8 @@ def baixar_relatorio_mobyan():
     print("=" * 70)
     print("BAIXANDO RELATÓRIO DA MOBYAN")
     print("=" * 70)
+
+    progresso.emitir(10, "Gerando pendências Mobyan...")
 
     with sync_playwright() as p:
         navegador = p.chromium.launch(headless=True)
@@ -811,6 +814,8 @@ def baixar_relatorio_ogea():
     print("=" * 70)
     print("BAIXANDO RELATÓRIO DO OGEA")
     print("=" * 70)
+
+    progresso.emitir(45, "Gerando pendências OGEA...")
 
     with sync_playwright() as p:
         navegador = p.chromium.launch(headless=True)

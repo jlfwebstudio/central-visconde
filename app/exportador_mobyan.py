@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 from caminho_base import BASE_DIR
+import progresso
 from baixar_relatorios_roteirizacao import baixar_relatorio_ogea
 from sla_bases import (
     calcular_snapshot_diario,
@@ -3204,11 +3205,13 @@ def gerar_planilha_pendencias(caminho_csv_completo):
     # WhatsApp — Pendências Mobyan/Chamados/Acompanhamento continuam com ela.
     df_pendencias_sem_cartao = excluir_cartao_courier(df_pendencias)
 
+    progresso.emitir(30, "Gerando imagens das pendências Mobyan...")
     imagens_por_prestador = gerar_imagens_por_prestador(df_pendencias_sem_cartao)
 
     # OGEA entra só nas abas "Pendências OGEA" e "Chamados" (unificada) por
     # decisão explícita: Resumo, Acompanhamento (fluxo de abono) e Envios
     # (WhatsApp) continuam só-Mobyan por enquanto.
+    progresso.emitir(45, "Gerando pendências OGEA...")
     df_chamados_ogea = buscar_pendencias_ogea(hoje)
     df_pendencias_ogea = df_chamados_ogea[
         df_chamados_ogea["SITUAÇÃO"].isin(["VENCIDA", "VENCE HOJE"])
@@ -3227,6 +3230,7 @@ def gerar_planilha_pendencias(caminho_csv_completo):
     # pendências — qualquer falha aqui degrada pra planilha sem essas abas.
     # Bobina não conta pro controle de SLA (mesmo critério do Acompanhamento
     # Operacional) — as Pendências/Envios da própria base continuam com bobina.
+    progresso.emitir(60, "Calculando SLA por base...")
     try:
         df_chamados_unificado_sem_bobina = excluir_bobina(df_chamados_unificado)
         snapshot_hoje_sla = calcular_snapshot_diario(df_chamados_unificado_sem_bobina, hoje)
@@ -3238,6 +3242,7 @@ def gerar_planilha_pendencias(caminho_csv_completo):
         df_ranking_sla = pd.DataFrame(columns=COLUNAS_RANKING)
         df_detalhe_tecnico_sla = pd.DataFrame(columns=COLUNAS_DETALHE_TECNICO)
 
+    progresso.emitir(75, "Montando fila de envios por WhatsApp...")
     df_envios = criar_dataframe_envios(df_pendencias_sem_cartao, imagens_por_prestador, df_ranking_sla)
 
     # Envio individual por técnico (RS-SMART matriz) — mesma tolerância a falha
@@ -3321,6 +3326,7 @@ def gerar_planilha_pendencias(caminho_csv_completo):
     formatar_aba_envios(caminho_saida, "Envios Aguardando Estoque")
     formatar_aba_resumo(caminho_saida)
 
+    progresso.emitir(95, "Salvando planilha de pendências...")
     print(f"Planilha final salva em: {caminho_saida}")
     print(f"Total de pendências encontradas (Mobyan): {len(df_pendencias)}")
     print(f"Total de pendências encontradas (OGEA): {len(df_pendencias_ogea)}")
@@ -3912,6 +3918,7 @@ def exportar_relatorio_completo():
 
         page = contexto.new_page()
 
+        progresso.emitir(5, "Abrindo sistema da Mobyan...")
         print("Abrindo sistema da Mobyan...")
         page.goto(MOBYAN_URL)
 
@@ -3934,6 +3941,7 @@ def exportar_relatorio_completo():
         selecionar_prestadores(frame_relatorio)
         selecionar_estado_rs(frame_relatorio)
 
+        progresso.emitir(15, "Gerando pendências Mobyan...")
         print("Pesquisando relatório...")
         frame_relatorio.get_by_role("img", name="Pesquisar").click()
 
@@ -3958,6 +3966,7 @@ def exportar_relatorio_completo():
 
     limpar_csv_temporario(caminho_csv_temporario)
 
+    progresso.emitir(100, "Pendências geradas com sucesso.")
     print("Abrindo planilha final...")
     abrir_caminho(caminho_pendencias)
 
