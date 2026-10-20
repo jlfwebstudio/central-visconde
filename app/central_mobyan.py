@@ -1258,10 +1258,28 @@ class CentralVisconde:
                     acao_concluida = self.acao_atual
                     self.acao_atual = None
                     self.barra_progresso.pack_forget()
+
+                    mensagem_final = conteudo
+                    cor_final = COR_VERDE
+                    if acao_concluida == "Gerar Roteiros PDF":
+                        arquivo_puladas = PASTA_PDFS / "_OSs_PULADAS.txt"
+                        if arquivo_puladas.exists():
+                            total_falhas = ""
+                            for linha in arquivo_puladas.read_text(encoding="utf-8").splitlines():
+                                if linha.strip().startswith("Total de falhas:"):
+                                    total_falhas = linha.split(":", 1)[1].strip()
+                                    break
+                            quantidade = f"{total_falhas} " if total_falhas else ""
+                            mensagem_final = (
+                                f"Roteiros gerados, mas {quantidade}OS(s)/técnico(s) foram "
+                                "pulados — veja _OSs_PULADAS.txt na pasta de PDFs."
+                            )
+                            cor_final = COR_LARANJA
+
                     self.escrever_log("\n" + "=" * 70 + "\n")
-                    self.escrever_log(conteudo + "\n")
-                    self.definir_status(conteudo, COR_VERDE)
-                    self.notificar("ViscondeApp", conteudo)
+                    self.escrever_log(mensagem_final + "\n")
+                    self.definir_status(mensagem_final, cor_final)
+                    self.notificar("ViscondeApp", mensagem_final)
                     self.liberar_botoes()
                     self.atualizar_resumos()
                     if acao_concluida == "Gerar Roteirização":

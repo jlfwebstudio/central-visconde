@@ -968,34 +968,58 @@ def unir_pdfs_mobyan_do_tecnico(
     return total_paginas
 
 
-def salvar_log_falhas_mobyan(falhas, iniciado_em):
-    """Grava um relatório persistente das OSs ignoradas."""
+ARQUIVO_OSS_PULADAS = PASTA_PDFS / "_OSs_PULADAS.txt"
+
+
+def salvar_relatorio_falhas_pdfs(falhas, iniciado_em):
+    """Grava o relatório das OSs/técnicos ignorados em dois lugares:
+
+    - logs/pdfs/falhas_pdfs_<timestamp>.txt: histórico detalhado, um arquivo
+      por execução (não é apagado).
+    - outputs/pdfs/_OSs_PULADAS.txt: aviso visível junto dos PDFs gerados,
+      pra quem só abre essa pasta notar que falta algo pra baixar na mão.
+      É sobrescrito a cada execução e REMOVIDO se não houver falha, pra não
+      sobrar um aviso de uma execução antiga.
+    """
+    preparar_pastas()
+
     if not falhas:
+        try:
+            ARQUIVO_OSS_PULADAS.unlink(missing_ok=True)
+        except Exception:
+            pass
         return None
 
-    preparar_pastas()
-    timestamp = iniciado_em.strftime("%Y-%m-%d_%H-%M-%S")
-    caminho = PASTA_LOGS / f"falhas_mobyan_{timestamp}.txt"
-
     linhas = [
-        "RELATÓRIO DE FALHAS - PDFs MOBYAN",
+        "OSs/TÉCNICOS QUE FICARAM DE FORA DO PDF AUTOMÁTICO",
         "=" * 70,
-        f"Execução iniciada em: {iniciado_em.strftime('%d/%m/%Y %H:%M:%S')}",
+        f"Execução de: {iniciado_em.strftime('%d/%m/%Y %H:%M:%S')}",
         f"Total de falhas: {len(falhas)}",
+        "",
+        "Faça a exportação manual dessas OSs/técnicos diretamente no",
+        "sistema de origem (Mobyan ou OGEA).",
         "",
     ]
 
     for indice, falha in enumerate(falhas, start=1):
         linhas.extend([
-            f"{indice}. Técnico: {falha['tecnico']}",
+            f"{indice}. [{falha.get('origem', '?')}] Técnico: {falha['tecnico']}",
             f"   OS: {falha['os']}",
             f"   Etapa: {falha['etapa']}",
             f"   Erro: {falha['erro']}",
             "",
         ])
 
-    caminho.write_text("\n".join(linhas), encoding="utf-8")
-    return caminho
+    texto = "\n".join(linhas)
+
+    timestamp = iniciado_em.strftime("%Y-%m-%d_%H-%M-%S")
+    caminho_historico = PASTA_LOGS / f"falhas_pdfs_{timestamp}.txt"
+    caminho_historico.write_text(texto, encoding="utf-8")
+
+    PASTA_PDFS.mkdir(parents=True, exist_ok=True)
+    ARQUIVO_OSS_PULADAS.write_text(texto, encoding="utf-8")
+
+    return caminho_historico
 
 def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
     tarefas = [
@@ -1230,10 +1254,6 @@ def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
             contexto.close()
             navegador.close()
 
-    caminho_log = salvar_log_falhas_mobyan(
-        falhas,
-        iniciado_em,
-    )
     falhas_individuais = sum(
         1
         for falha in falhas
@@ -1247,11 +1267,10 @@ def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
     print(f"OSs geradas individualmente: {total_oss - falhas_individuais}")
     print(f"OSs com erro ignorado: {falhas_individuais}")
 
-    if caminho_log:
-        print(f"Log das falhas: {caminho_log}")
+    if falhas:
         print(
-            "As OSs listadas nesse arquivo deverão ser feitas "
-            "manualmente."
+            f"{len(falhas)} falha(s) nesta etapa — ver relatório "
+            "consolidado ao final da execução."
         )
     else:
         print("Nenhuma OS individual da Mobyan apresentou erro.")
@@ -1259,7 +1278,9 @@ def gerar_pdfs_mobyan(listas, pasta_destino=PASTA_PDFS):
     print("-" * 70)
 
     shutil.rmtree(pasta_individuais, ignore_errors=True)
-    return gerados
+    for falha in falhas:
+        falha.setdefault("origem", "MOBYAN")
+    return gerados, falhas
 
 
 def primeiro_elemento_visivel_ogea(
@@ -1570,6 +1591,7 @@ def gerar_pdfs_ogea(listas, pasta_destino=PASTA_PDFS):
     print("=" * 70)
 
     gerados = []
+    falhas = []
 
     with sync_playwright() as playwright:
         navegador = playwright.chromium.launch(headless=True)
@@ -1598,69 +1620,95 @@ def gerar_pdfs_ogea(listas, pasta_destino=PASTA_PDFS):
                     f"{len(oss)} OS(s)."
                 )
 
-                abrir_ordem_servico_ogea(page)
-
-                campo_oss = page.locator("#serviceOrderCodes")
-                esperar_elemento_ogea(
-                    campo_oss,
-                    "campo de números das OSs",
-                    timeout_segundos=PDF_TIMEOUT_SEGUNDOS,
-                )
-
-                campo_oss.fill(",".join(oss))
-                campo_oss.press("Enter")
-                page.wait_for_timeout(750)
-
-                # Em algumas respostas lentas do OGEA, o Enter pode iniciar
-                # a pesquisa. Se os resultados já apareceram, não tenta clicar
-                # novamente no botão Pesquisar.
-                checkbox_todos = None
-
                 try:
-                    checkbox_todos = localizar_checkbox_todos_ogea(
+                    abrir_ordem_servico_ogea(page)
+
+                    campo_oss = page.locator("#serviceOrderCodes")
+                    esperar_elemento_ogea(
+                        campo_oss,
+                        "campo de números das OSs",
+                        timeout_segundos=PDF_TIMEOUT_SEGUNDOS,
+                    )
+
+                    campo_oss.fill(",".join(oss))
+                    campo_oss.press("Enter")
+                    page.wait_for_timeout(750)
+
+                    # Em algumas respostas lentas do OGEA, o Enter pode
+                    # iniciar a pesquisa. Se os resultados já apareceram, não
+                    # tenta clicar novamente no botão Pesquisar.
+                    checkbox_todos = None
+
+                    try:
+                        checkbox_todos = localizar_checkbox_todos_ogea(
+                            page,
+                            timeout_segundos=3,
+                        )
+                        print(
+                            "A pesquisa foi iniciada ao confirmar as OSs."
+                        )
+                    except Exception:
+                        botao_pesquisar = localizar_botao_pesquisar_ogea(
+                            page
+                        )
+                        botao_pesquisar.scroll_into_view_if_needed()
+                        botao_pesquisar.click()
+                        checkbox_todos = aguardar_resultado_ogea(page)
+
+                    try:
+                        if checkbox_todos.is_checked():
+                            checkbox_todos.uncheck()
+                    except Exception:
+                        pass
+
+                    checkbox_todos.check()
+
+                    botao_imprimir = localizar_botao_imprimir_ogea(page)
+                    botao_imprimir.scroll_into_view_if_needed()
+
+                    salvar_pdf_ogea_pela_requisicao(
+                        contexto,
                         page,
-                        timeout_segundos=3,
+                        botao_imprimir,
+                        caminho,
+                        f"OGEA - {tecnico}",
+                    )
+
+                    gerados.append(caminho)
+
+                except Exception as erro:
+                    try:
+                        caminho.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+                    mensagem = str(erro).strip() or type(erro).__name__
+                    falhas.append({
+                        "origem": "OGEA",
+                        "tecnico": tecnico,
+                        "os": ", ".join(oss),
+                        "etapa": "geração OGEA",
+                        "erro": mensagem,
+                    })
+                    salvar_screenshot(page, f"erro_pdfs_ogea_{limpar_nome_arquivo(tecnico)}")
+                    print(
+                        "  ERRO IGNORADO | "
+                        f"Técnico: {tecnico} | {mensagem}"
                     )
                     print(
-                        "A pesquisa foi iniciada ao confirmar as OSs."
+                        "  A automação continuará para o próximo técnico."
                     )
-                except Exception:
-                    botao_pesquisar = localizar_botao_pesquisar_ogea(
-                        page
-                    )
-                    botao_pesquisar.scroll_into_view_if_needed()
-                    botao_pesquisar.click()
-                    checkbox_todos = aguardar_resultado_ogea(page)
-
-                try:
-                    if checkbox_todos.is_checked():
-                        checkbox_todos.uncheck()
-                except Exception:
-                    pass
-
-                checkbox_todos.check()
-
-                botao_imprimir = localizar_botao_imprimir_ogea(page)
-                botao_imprimir.scroll_into_view_if_needed()
-
-                salvar_pdf_ogea_pela_requisicao(
-                    contexto,
-                    page,
-                    botao_imprimir,
-                    caminho,
-                    f"OGEA - {tecnico}",
-                )
-
-                gerados.append(caminho)
 
         except Exception:
+            # Falhas estruturais, como login, ainda são fatais porque
+            # impedem todos os técnicos de serem processados.
             salvar_screenshot(page, "erro_pdfs_ogea")
             raise
         finally:
             contexto.close()
             navegador.close()
 
-    return gerados
+    return gerados, falhas
 
 
 def validar_pypdf():
@@ -1695,69 +1743,86 @@ def unir_pdfs_por_tecnico(listas):
     print("=" * 70)
 
     roteiros = []
+    falhas = []
 
     for indice, item in enumerate(listas, start=1):
         tecnico = item["tecnico"]
         nome = limpar_nome_arquivo(tecnico)
 
-        partes = [
-            PASTA_PDFS_TEMP / f"Mobyan - {nome}.pdf",
-            PASTA_PDFS_TEMP / f"OGEA - {nome}.pdf",
-        ]
-        partes = [
-            caminho
-            for caminho in partes
-            if caminho.exists() and caminho.stat().st_size > 0
-        ]
+        try:
+            partes = [
+                PASTA_PDFS_TEMP / f"Mobyan - {nome}.pdf",
+                PASTA_PDFS_TEMP / f"OGEA - {nome}.pdf",
+            ]
+            partes = [
+                caminho
+                for caminho in partes
+                if caminho.exists() and caminho.stat().st_size > 0
+            ]
 
-        if not partes:
+            if not partes:
+                print(
+                    f"[{indice}/{len(listas)}] {tecnico}: "
+                    "nenhum PDF encontrado para unir."
+                )
+                continue
+
+            destino = PASTA_PDFS / f"Roteiro - {nome}.pdf"
+            escritor = PdfWriter()
+            total_paginas = 0
+
+            for parte in partes:
+                leitor = PdfReader(str(parte))
+
+                for pagina in leitor.pages:
+                    escritor.add_page(pagina)
+                    total_paginas += 1
+
+            escritor.add_metadata({
+                "/Title": f"Roteiro - {tecnico}",
+                "/Subject": "Ordens de Serviço Mobyan e OGEA",
+                "/Creator": "Central Mobyan",
+            })
+
+            with destino.open("wb") as arquivo_saida:
+                escritor.write(arquivo_saida)
+
+            # Validação final: arquivo PDF legível e com a quantidade esperada.
+            paginas_validas = quantidade_paginas_pdf(destino)
+
+            if paginas_validas != total_paginas:
+                raise RuntimeError(
+                    f"Roteiro - {tecnico}: eram esperadas "
+                    f"{total_paginas} páginas, mas o arquivo final possui "
+                    f"{paginas_validas}."
+                )
+
+            origens = " + ".join(
+                parte.name.split(" - ", 1)[0]
+                for parte in partes
+            )
+
             print(
-                f"[{indice}/{len(listas)}] {tecnico}: "
-                "nenhum PDF encontrado para unir."
-            )
-            continue
-
-        destino = PASTA_PDFS / f"Roteiro - {nome}.pdf"
-        escritor = PdfWriter()
-        total_paginas = 0
-
-        for parte in partes:
-            leitor = PdfReader(str(parte))
-
-            for pagina in leitor.pages:
-                escritor.add_page(pagina)
-                total_paginas += 1
-
-        escritor.add_metadata({
-            "/Title": f"Roteiro - {tecnico}",
-            "/Subject": "Ordens de Serviço Mobyan e OGEA",
-            "/Creator": "Central Mobyan",
-        })
-
-        with destino.open("wb") as arquivo_saida:
-            escritor.write(arquivo_saida)
-
-        # Validação final: arquivo PDF legível e com a quantidade esperada.
-        paginas_validas = quantidade_paginas_pdf(destino)
-
-        if paginas_validas != total_paginas:
-            raise RuntimeError(
-                f"Roteiro - {tecnico}: eram esperadas "
-                f"{total_paginas} páginas, mas o arquivo final possui "
-                f"{paginas_validas}."
+                f"[{indice}/{len(listas)}] Roteiro - {tecnico}: "
+                f"{total_paginas} página(s) ({origens})."
             )
 
-        origens = " + ".join(
-            parte.name.split(" - ", 1)[0]
-            for parte in partes
-        )
+            roteiros.append(destino)
 
-        print(
-            f"[{indice}/{len(listas)}] Roteiro - {tecnico}: "
-            f"{total_paginas} página(s) ({origens})."
-        )
-
-        roteiros.append(destino)
+        except Exception as erro:
+            mensagem = str(erro).strip() or type(erro).__name__
+            falhas.append({
+                "origem": "UNIÃO",
+                "tecnico": tecnico,
+                "os": "PDF final do técnico",
+                "etapa": "união Mobyan + OGEA",
+                "erro": mensagem,
+            })
+            print(
+                f"[{indice}/{len(listas)}] ERRO IGNORADO AO UNIR | "
+                f"Técnico: {tecnico} | {mensagem}"
+            )
+            print("  A automação continuará para o próximo técnico.")
 
     if not roteiros:
         raise RuntimeError(
@@ -1767,7 +1832,7 @@ def unir_pdfs_por_tecnico(listas):
     # Os arquivos separados servem apenas como intermediários.
     shutil.rmtree(PASTA_PDFS_TEMP, ignore_errors=True)
 
-    return roteiros
+    return roteiros, falhas
 
 def abrir_pasta(caminho):
     try:
@@ -1854,39 +1919,58 @@ def main():
     print(f"OSs OGEA: {total_ogea}")
 
     gerados = []
+    todas_falhas = []
+    iniciado_em = datetime.now()
 
     # Modos de teste continuam gerando o arquivo separado da origem.
     if args.somente_ogea:
-        gerados.extend(
-            gerar_pdfs_ogea(
-                listas,
-                pasta_destino=PASTA_PDFS,
-            )
+        gerados_ogea, falhas_ogea = gerar_pdfs_ogea(
+            listas,
+            pasta_destino=PASTA_PDFS,
         )
+        gerados.extend(gerados_ogea)
+        todas_falhas.extend(falhas_ogea)
     elif args.somente_mobyan:
-        gerados.extend(
-            gerar_pdfs_mobyan(
-                listas,
-                pasta_destino=PASTA_PDFS,
-            )
+        gerados_mobyan, falhas_mobyan = gerar_pdfs_mobyan(
+            listas,
+            pasta_destino=PASTA_PDFS,
         )
+        gerados.extend(gerados_mobyan)
+        todas_falhas.extend(falhas_mobyan)
     else:
         # Execução normal: os PDFs separados ficam temporariamente em
-        # _temporarios e são unidos em um único roteiro por técnico.
+        # _temporarios e são unidos em um único roteiro por técnico. Uma
+        # falha pontual (OS, técnico ou etapa de união) nunca derruba o
+        # resto — ela só entra no relatório de falhas, e a automação
+        # continua pros demais técnicos.
         progresso.emitir(10, "Gerando PDFs Mobyan...")
-        gerar_pdfs_mobyan(
+        _, falhas_mobyan = gerar_pdfs_mobyan(
             listas,
             pasta_destino=PASTA_PDFS_TEMP,
         )
-        progresso.emitir(55, "Gerando PDFs OGEA...")
-        gerar_pdfs_ogea(
-            listas,
-            pasta_destino=PASTA_PDFS_TEMP,
-        )
-        progresso.emitir(90, "Unindo PDFs por técnico...")
-        gerados = unir_pdfs_por_tecnico(listas)
+        todas_falhas.extend(falhas_mobyan)
 
-    progresso.emitir(100, "Roteiros PDF gerados com sucesso.")
+        progresso.emitir(55, "Gerando PDFs OGEA...")
+        _, falhas_ogea = gerar_pdfs_ogea(
+            listas,
+            pasta_destino=PASTA_PDFS_TEMP,
+        )
+        todas_falhas.extend(falhas_ogea)
+
+        progresso.emitir(90, "Unindo PDFs por técnico...")
+        gerados, falhas_uniao = unir_pdfs_por_tecnico(listas)
+        todas_falhas.extend(falhas_uniao)
+
+    caminho_relatorio = salvar_relatorio_falhas_pdfs(todas_falhas, iniciado_em)
+
+    if todas_falhas:
+        progresso.emitir(
+            100,
+            f"Roteiros gerados — {len(todas_falhas)} OS(s)/técnico(s) pulado(s).",
+        )
+    else:
+        progresso.emitir(100, "Roteiros PDF gerados com sucesso.")
+
     print("")
     print("=" * 70)
 
@@ -1900,6 +1984,16 @@ def main():
 
     for caminho in gerados:
         print(caminho.name)
+
+    if todas_falhas:
+        print("")
+        print("-" * 70)
+        print(f"ATENÇÃO: {len(todas_falhas)} OS(s)/técnico(s) pulado(s) nesta execução.")
+        print(f"Relatório completo em: {ARQUIVO_OSS_PULADAS}")
+        if caminho_relatorio:
+            print(f"Histórico desta execução: {caminho_relatorio}")
+        print("Faça a exportação manual dessas OSs ao chegar na empresa.")
+        print("-" * 70)
 
     if not args.sem_abrir:
         abrir_pasta(PASTA_PDFS)
